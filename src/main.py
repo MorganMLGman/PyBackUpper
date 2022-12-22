@@ -1,4 +1,6 @@
+from colorama import Fore, Back, Style
 import os
+import shutil
 from pprint import pprint
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -8,6 +10,7 @@ config = {
     "HOUR": 3,
     "MINUTE": 0,
     "IF_COMPRESS": False,
+    "IGNORE_PATTERNS": [""],
 }
 
 def read_env():
@@ -64,6 +67,17 @@ def read_env():
         pass
     except ValueError as e:
         raise ValueError("IF_COMPRESS must be true or false") from e
+    
+    
+    try:
+        patterns = os.environ["IGNORE_PATTERNS"]
+        patterns = patterns.split(',')
+        patterns_array = []
+        for pattern in patterns:
+            patterns_array.append(pattern.strip())
+        config["IGNORE_PATTERNS"] = patterns_array
+    except KeyError:
+        pass
 
 def check_paths():
     if(os.path.exists("/source")):
@@ -75,15 +89,57 @@ def check_paths():
         pprint("/target directory exists")
     else:
         raise OSError("/target directory does not exists")
+
+def get_source_size() -> int:
+    size = 0
     
-def job():
-    print("test")
+    for path, dirs, files in os.walk('/source'):
+        for file in files:
+            file_path = os.path.join(path, file)
+            size += os.path.getsize(file_path)
+            
+    return size
+    
+def get_target_space() -> int:
+    return shutil.disk_usage('/source').free
+    
+def format_file_size(size, decimals=2, binary_system=True):
+    if binary_system:
+        units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB']
+        largest_unit = 'YiB'
+        step = 1024
+    else:
+        units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB']
+        largest_unit = 'YB'
+        step = 1000
+
+    for unit in units:
+        if size < step:
+            return ('%.' + str(decimals) + 'f %s') % (size, unit)
+        size /= step
+
+    return ('%.' + str(decimals) + 'f %s') % (size, largest_unit)
+
+def check_required_space(source: int, target: int) -> bool:
+    if 2 * source < target:
+        return True
+    else:
+        print(Fore.RED)
+        print("Not enough space!")
+        print("Minimum required space to create backup is 2 sizes of the source")
+        print(f"Source size: {format_file_size(source)}, target available space: {format_file_size(target)}")
+        print("Please clear some space. Backup will be resumed on the next planned day.")
+        print(Style.RESET_ALL)
+        return False
 
 def main():
     read_env()    
     pprint(config)
     check_paths()
-    
+    pprint(os.listdir("/source"))
+    source_size = get_source_size()
+    target_space = get_target_space()
+    check_required_space(source_size, target_space)
     # sched = BlockingScheduler()
     # sched.add_job(job, "interval", seconds=5)
     # sched.start()
