@@ -132,3 +132,4 @@ dmypy.json
 *.code-workspace
 .test-source
 .test-target
+test.cmd
