@@ -1,9 +1,8 @@
 import logging
 import logging.config
-from colorama import Fore, Back, Style
 import os
 import shutil
-from pprint import pprint
+import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 config = {
@@ -83,13 +82,15 @@ def read_env():
 
 def check_paths():
     if(os.path.exists("/source")):
-        pprint("/source directory exists")
+        logger.debug("/source directory exists")
     else:
+        logger.critical("/source directory does not exists")
         raise OSError("/source directory does not exists")
     
     if(os.path.exists("/target")):
-        pprint("/target directory exists")
+        logger.debug("/target directory exists")
     else:
+        logger.critical("/target directory does not exists")
         raise OSError("/target directory does not exists")
 
 def get_source_size() -> int:
@@ -126,32 +127,36 @@ def check_required_space(source: int, target: int) -> bool:
     if 2 * source < target:
         return True
     else:
-        print(Fore.RED)
-        print("Not enough space!")
-        print("Minimum required space to create backup is 2 sizes of the source")
-        print(f"Source size: {format_file_size(source)}, target available space: {format_file_size(target)}")
-        print("Please clear some space. Backup will be resumed on the next planned day.")
-        print(Style.RESET_ALL)
+        logger.error("Not enough space!")
+        logger.error("Minimum required space to create backup is 2 sizes of the source")
+        logger.error("Source size: %s, target available space: %s", format_file_size(source), format_file_size(target))
+        logger.error("Please clear some space. Backup will be resumed on the next planned day.")
         return False
-
-def main():
-    logging.config.fileConfig("log.conf", disable_existing_loggers=True)
-    global logger 
-    logger = logging.getLogger('pybackupper_logger')
-    read_env()    
-    logger.info(config)
+    
+def run_backup():
+    logger.info("Backup started at %s", datetime.datetime.today())
     check_paths()
-    pprint(os.listdir("/source"))
     source_size = get_source_size()
     target_space = get_target_space()
     if check_required_space(source_size, target_space):
-        print()
+        logger.info("Available space is enough to create new backup")
     else:
-        return -1
+        return
+
+def main():
+    read_env()    
+    logger.info(config)
+    check_paths()
     
-    # sched = BlockingScheduler()
-    # sched.add_job(job, "interval", seconds=5)
-    # sched.start()
+    try:
+        sched = BlockingScheduler()
+        sched.add_job(run_backup, "interval", seconds=10)
+        sched.start()
+    except KeyboardInterrupt:
+        logger.warning("Keyboard interrupt. Exiting now.")
+        exit()
 
 if __name__ == "__main__":
+    logging.config.fileConfig("log.conf", disable_existing_loggers=True)
+    logger = logging.getLogger('pybackupper_logger')
     main()
