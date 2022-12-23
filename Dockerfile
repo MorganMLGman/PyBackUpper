@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./src ./
 
-RUN mkdir -p /source /target
+RUN mkdir -p /source /target /logs
 
 CMD [ "python", "-u", "./main.py" ]

@@ -1,3 +1,5 @@
+import logging
+import logging.config
 from colorama import Fore, Back, Style
 import os
 import shutil
@@ -133,13 +135,20 @@ def check_required_space(source: int, target: int) -> bool:
         return False
 
 def main():
+    logging.config.fileConfig("log.conf", disable_existing_loggers=True)
+    global logger 
+    logger = logging.getLogger('pybackupper_logger')
     read_env()    
-    pprint(config)
+    logger.info(config)
     check_paths()
     pprint(os.listdir("/source"))
     source_size = get_source_size()
     target_space = get_target_space()
-    check_required_space(source_size, target_space)
+    if check_required_space(source_size, target_space):
+        print()
+    else:
+        return -1
+    
     # sched = BlockingScheduler()
     # sched.add_job(job, "interval", seconds=5)
     # sched.start()
