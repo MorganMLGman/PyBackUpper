@@ -7,6 +7,8 @@ from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 config = {
+    "PUID": 1000, # TODO: dopisać odczyt z ENV
+    "PGID": 1000, # TODO: dopisać odczyt z ENV
     "RUNS_TO_KEEP": 7,
     "DAYS_TO_RUN": [1, 3, 5, 7], #1: Monday .... 7: Sunday
     "HOUR": 3,
@@ -133,7 +135,7 @@ def check_required_space(source: int, target: int) -> bool:
         logger.error("Please clear some space. Backup will be resumed on the next planned day.")
         return False 
     
-def _create_raw_copy_():
+def _create_raw_copy_() -> str:
     today = datetime.datetime.today().strftime("%Y_%m_%d_%H_%M")
     backup_dir = os.path.join("/target", today)
     if os.path.exists(backup_dir) and os.path.isdir(backup_dir):
@@ -144,7 +146,23 @@ def _create_raw_copy_():
         shutil.copytree('/source', backup_dir, ignore=shutil.ignore_patterns(*config["IGNORE_PATTERNS"]))
         end_time = perf_counter()
         logger.info("Raw copy saved to \"%s\". Took %s seconds", backup_dir, round(end_time - start_time, 2))
+        return today
     
+def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
+    backup_dir = os.path.join("/target", from_dir)
+    if not os.path.exists(backup_dir):
+        logger.error("Cannot create archive from not existing directory. Directory name: \"%s\". Skipping iteration")
+        return False
+    
+    start_time = perf_counter()
+    archive_name = shutil.make_archive(backup_dir, format, '/target', from_dir, logger=logger)
+    end_time = perf_counter()
+        
+    archive_name = os.path.basename(archive_name)
+    logger.info("Archive \"%s\" created. Took %s seconds", archive_name, round(end_time - start_time, 2))
+    archive_list.append(archive_name)    
+    return True
+
     
 def run_backup():
     logger.info("Backup started at %s", datetime.datetime.today())
@@ -155,8 +173,50 @@ def run_backup():
     if not check_required_space(source_size, target_space):
         return    
     
+    old_dirs = [x for x in os.listdir('/target') if os.path.isdir(os.path.join('/target', x))]    
+    logger.debug("Available old backup directories: %s", old_dirs)
+    
     logger.info("Available space is enough to create new backup. Available space %s", format_file_size(target_space))
-    _create_raw_copy_()
+    name = _create_raw_copy_()
+    
+    if name is None:
+        return
+        
+    if config["IF_COMPRESS"]:
+        archive_list = []
+        try:
+            with open("/target/archive_list.txt", "r") as archive_file:
+                for archive_line in archive_file.readlines():
+                    archive_list.append(archive_line.strip())
+        except FileNotFoundError:
+            pass
+        
+        if not _create_archive_(name, archive_list, "xztar"):
+            return
+                
+        if len(archive_list) > 0:
+            while len(archive_list) > config["RUNS_TO_KEEP"]:
+                old_archive = archive_list.pop(0)
+                logger.debug("Removing old archive: %s", old_archive)
+                os.remove(os.path.join('/target', old_archive))
+                
+            try:
+                with open("/target/archive_list.txt", "w") as archive_file:        
+                    for archive in archive_list:
+                        archive_file.write(f"{archive}\n")
+            except Exception as e:
+                logger.exception("Error while saving archive_list.txt file", e)
+                return
+            else:
+                for dir in old_dirs:
+                    logger.debug("Removing old directory: %s", dir)
+                    shutil.rmtree(os.path.join('/target', dir), ignore_errors=True)
+                
+        else:
+            logger.warning("archive_list.txt file was not read. Skipping archive remove part.")
+                
+
+            
 
 def main():
     logger.warning("Script is starting")
@@ -166,7 +226,7 @@ def main():
     
     try:
         sched = BlockingScheduler()
-        sched.add_job(run_backup, "interval", seconds=10)
+        sched.add_job(run_backup, "interval", seconds=60)
         sched.start()
     except KeyboardInterrupt:
         logger.warning("Keyboard interrupt. Exiting now.")
