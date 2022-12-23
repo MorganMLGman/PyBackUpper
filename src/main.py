@@ -214,6 +214,24 @@ def run_backup():
                 
         else:
             logger.warning("archive_list.txt file was not read. Skipping archive remove part.")
+            
+    else:
+        backup_dirs = [x for x in os.listdir('/target') if os.path.isdir(os.path.join('/target', x))]
+        
+        backup_list = []
+        
+        for backup_dir in backup_dirs:
+            backup_list.append(datetime.datetime.strptime(backup_dir, "%Y_%m_%d_%H_%M"))
+            
+        backup_list.sort()
+        
+        while len(backup_list) > config["RUNS_TO_KEEP"]:
+            old_backup = backup_list.pop(0)
+            old_backup = old_backup.strftime("%Y_%m_%d_%H_%M")
+            logger.debug("Removing old directory: %s", old_backup)
+            shutil.rmtree(os.path.join('/target', old_backup))
+        
+        
                 
 
             
@@ -224,13 +242,15 @@ def main():
     logger.info(config)
     check_paths()
     
-    try:
-        sched = BlockingScheduler()
-        sched.add_job(run_backup, "interval", seconds=60)
-        sched.start()
-    except KeyboardInterrupt:
-        logger.warning("Keyboard interrupt. Exiting now.")
-        exit()
+    run_backup()
+    
+    # try:
+    #     sched = BlockingScheduler()
+    #     sched.add_job(run_backup, "interval", seconds=60)
+    #     sched.start()
+    # except KeyboardInterrupt:
+    #     logger.warning("Keyboard interrupt. Exiting now.")
+    #     exit()
 
 if __name__ == "__main__":
     logging.config.fileConfig("log.conf", disable_existing_loggers=True)
