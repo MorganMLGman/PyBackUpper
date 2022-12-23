@@ -3,6 +3,7 @@ import logging.config
 import os
 import shutil
 import datetime
+from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 config = {
@@ -95,7 +96,6 @@ def check_paths():
 
 def get_source_size() -> int:
     size = 0
-    
     for path, dirs, files in os.walk('/source'):
         for file in files:
             file_path = os.path.join(path, file)
@@ -131,19 +131,35 @@ def check_required_space(source: int, target: int) -> bool:
         logger.error("Minimum required space to create backup is 2 sizes of the source")
         logger.error("Source size: %s, target available space: %s", format_file_size(source), format_file_size(target))
         logger.error("Please clear some space. Backup will be resumed on the next planned day.")
-        return False
+        return False 
+    
+def _create_raw_copy_():
+    today = datetime.datetime.today().strftime("%Y_%m_%d_%H_%M")
+    backup_dir = os.path.join("/target", today)
+    if os.path.exists(backup_dir) and os.path.isdir(backup_dir):
+        logger.error("Backup with name \"%s\" already exists. Cannot create new one. Skipping iteration", today)
+        return
+    else:
+        start_time = perf_counter()
+        shutil.copytree('/source', backup_dir, ignore=shutil.ignore_patterns(*config["IGNORE_PATTERNS"]))
+        end_time = perf_counter()
+        logger.info("Raw copy saved to \"%s\". Took %s seconds", backup_dir, round(end_time - start_time, 2))
+    
     
 def run_backup():
     logger.info("Backup started at %s", datetime.datetime.today())
     check_paths()
     source_size = get_source_size()
     target_space = get_target_space()
-    if check_required_space(source_size, target_space):
-        logger.info("Available space is enough to create new backup")
-    else:
-        return
+    
+    if not check_required_space(source_size, target_space):
+        return    
+    
+    logger.info("Available space is enough to create new backup. Available space %s", format_file_size(target_space))
+    _create_raw_copy_()
 
 def main():
+    logger.warning("Script is starting")
     read_env()    
     logger.info(config)
     check_paths()
