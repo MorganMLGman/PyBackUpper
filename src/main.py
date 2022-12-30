@@ -7,12 +7,13 @@ import py7zr
 import datetime
 from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 config = {
     "PUID": 1000,
     "PGID": 1000,
     "RUNS_TO_KEEP": 7,
-    "DAYS_TO_RUN": [1, 3, 5, 7], #1: Monday .... 7: Sunday
+    "DAYS_TO_RUN": [0, 2, 4, 6], #0: Monday .... 6: Sunday
     "HOUR": 3,
     "MINUTE": 0,
     "IF_COMPRESS": False,
@@ -290,16 +291,21 @@ def main():
 
     logger.debug("Registering 7zip as archive format")
     shutil.register_archive_format('7zip', py7zr.pack_7zarchive, description='7zip archive')
-    
-    run_backup()
-    
-    # try:
-    #     sched = BlockingScheduler()
-    #     sched.add_job(run_backup, "interval", seconds=60)
-    #     sched.start()
-    # except KeyboardInterrupt:
-    #     logger.warning("Keyboard interrupt. Exiting now.")
-    #     exit()
+        
+    try:
+        sched = BlockingScheduler()
+        sched.add_job(run_backup,
+                      trigger=CronTrigger(
+                          day_of_week=config["DAYS_TO_RUN"],
+                          hour=config["HOUR"],
+                          minute=config["MINUTE"]),
+                      id='backup',
+                      name='Create backup',
+                      replace_existing=True)
+        sched.start()
+    except KeyboardInterrupt:
+        logger.warning("Keyboard interrupt. Exiting now.")
+        exit()
 
 if __name__ == "__main__":
     logging.config.fileConfig("log.conf", disable_existing_loggers=True)
