@@ -9,4 +9,4 @@ COPY ./src ./
 
 RUN mkdir -p /source /target /logs
 
-CMD [ "python", "-u", "./main.py" ]
+ENTRYPOINT [ "python", "-u", "./main.py" ]

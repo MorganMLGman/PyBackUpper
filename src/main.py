@@ -1,14 +1,16 @@
 import logging
 import logging.config
+import resource
 import os
 import shutil
+import py7zr
 import datetime
 from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 config = {
-    "PUID": 1000, # TODO: dopisać odczyt z ENV
-    "PGID": 1000, # TODO: dopisać odczyt z ENV
+    "PUID": 1000,
+    "PGID": 1000,
     "RUNS_TO_KEEP": 7,
     "DAYS_TO_RUN": [1, 3, 5, 7], #1: Monday .... 7: Sunday
     "HOUR": 3,
@@ -18,6 +20,26 @@ config = {
 }
 
 def read_env():
+    try:
+        config["PUID"] = int(os.environ['PUID'])
+    except KeyError:
+        config["PUID"] = 1000
+    
+    if config["PUID"] < 0 or config["PUID"] > 65535:
+        logger.exception("Value of PUID must be between 0 and 65535, not %s", config["PUID"])
+        raise ValueError("Value of PUID must be between 0 and 65535")
+    
+    
+    try:
+        config["PGID"] = int(os.environ['PGID'])
+    except KeyError:
+        config["PGID"] = 1000
+    
+    if config["PGID"] < 0 or config["PGID"] > 65535:
+        logger.exception("Value of PUID must be between 0 and 65535, not %s", config["PGID"])
+        raise ValueError("Value of PGID must be between 0 and 65535")
+    
+    
     try:
         config["RUNS_TO_KEEP"] = int(os.environ['RUNS_TO_KEEP'])
     except KeyError:
@@ -148,6 +170,28 @@ def _create_raw_copy_() -> str:
         logger.info("Raw copy saved to \"%s\". Took %s seconds", backup_dir, round(end_time - start_time, 2))
         return today
     
+def _copy_owner_group_(target: str) -> None:
+    logger.debug("Changing permissions in target dir according to source")
+    
+    target_path = os.path.join('/target', target)    
+    source_stat = os.stat('/source')
+    logger.debug("Source stats: %s", source_stat)
+    shutil.chown(target_path, source_stat.st_uid, source_stat.st_gid)
+        
+    for path, dirs, files in os.walk(target_path):
+        if path != target_path:
+            src_dir_path = path.replace(target_path, '/source')
+            src_dir_path_stat = os.stat(src_dir_path)
+            logger.debug("Changing permissions for dir: %s to owner: %s, group %s", path, src_dir_path_stat.st_uid, src_dir_path_stat.st_gid)
+            shutil.chown(path, src_dir_path_stat.st_uid, src_dir_path_stat.st_gid)
+            
+        for file in files:
+            dst_file_path = os.path.join(path, file)
+            src_file_path = dst_file_path.replace(target_path, '/source')
+            src_file_path_stat = os.stat(src_file_path)
+            logger.debug("Changing permissions for file: %s to owner: %s, group %s", dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
+            shutil.chown(dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
+
 def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
     backup_dir = os.path.join("/target", from_dir)
     if not os.path.exists(backup_dir):
@@ -156,6 +200,7 @@ def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
     
     start_time = perf_counter()
     archive_name = shutil.make_archive(backup_dir, format, '/target', from_dir, logger=logger)
+    shutil.chown(archive_name, config["PUID"], config["PGID"])
     end_time = perf_counter()
         
     archive_name = os.path.basename(archive_name)
@@ -181,6 +226,8 @@ def run_backup():
     
     if name is None:
         return
+    
+    _copy_owner_group_(name)
         
     if config["IF_COMPRESS"]:
         archive_list = []
@@ -191,7 +238,7 @@ def run_backup():
         except FileNotFoundError:
             pass
         
-        if not _create_archive_(name, archive_list, "xztar"):
+        if not _create_archive_(name, archive_list, "7zip"):
             return
                 
         if len(archive_list) > 0:
@@ -229,18 +276,17 @@ def run_backup():
             old_backup = backup_list.pop(0)
             old_backup = old_backup.strftime("%Y_%m_%d_%H_%M")
             logger.debug("Removing old directory: %s", old_backup)
-            shutil.rmtree(os.path.join('/target', old_backup))
-        
-        
-                
+            shutil.rmtree(os.path.join('/target', old_backup))            
 
-            
-
-def main():
+def main():    
     logger.warning("Script is starting")
+            
     read_env()    
     logger.info(config)
     check_paths()
+
+    logger.debug("Registering 7zip as archive format")
+    shutil.register_archive_format('7zip', py7zr.pack_7zarchive, description='7zip archive')
     
     run_backup()
     
