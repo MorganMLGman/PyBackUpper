@@ -1,6 +1,6 @@
 import logging
 import logging.config
-import resource
+from gc import collect as gc_collect
 import os
 import shutil
 import py7zr
@@ -276,7 +276,10 @@ def run_backup():
             old_backup = backup_list.pop(0)
             old_backup = old_backup.strftime("%Y_%m_%d_%H_%M")
             logger.debug("Removing old directory: %s", old_backup)
-            shutil.rmtree(os.path.join('/target', old_backup))            
+            shutil.rmtree(os.path.join('/target', old_backup))
+    
+            
+    logger.debug("Running garbage collection: %s", gc_collect())
 
 def main():    
     logger.warning("Script is starting")
