@@ -1,9 +1,9 @@
 # PyBackUpper
 **Docker containerized Python application for creating backups.**
 
-[Features](https://github.com/MorganMLGman/PyBackUpper#features)
-[Docker-compose](https://github.com/MorganMLGman/PyBackUpper#docker-compose)
-[Changelog](https://github.com/MorganMLGman/PyBackUpper#changelog)
+ - [Features](https://github.com/MorganMLGman/PyBackUpper#features)
+ - [Docker-compose](https://github.com/MorganMLGman/PyBackUpper#docker-compose)
+ - [Changelog](https://github.com/MorganMLGman/PyBackUpper#changelog)
 
 PyBackUpper is simple Python application created to make backups of self-hosted server based on Docker, but could be used to create any kind of backups. For time of writing application can create backups at specified time of the day and specified days of week. Application create copy of the source directory at given time and preserve directory owner, group and permissions. It is also possible to compress created backup with to `.tar.gz` archive. Backups will be deleted from disk after given amount of runs, for example if you specify to run backup every second day and keep 7 runs, first backup will be deleted after two weeks. 
 
