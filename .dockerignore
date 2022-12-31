@@ -1,0 +1,11 @@
+.git
+.gitignore
+.vscode
+.venv
+README.md
+LICENSE
+test.cmd
+PyBackUpper.code-workspace
+.test-logs
+.test-target
+.test-source

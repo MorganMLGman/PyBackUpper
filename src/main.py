@@ -3,7 +3,6 @@ import logging.config
 from gc import collect as gc_collect
 import os
 import shutil
-import py7zr
 import datetime
 from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -19,6 +18,8 @@ config = {
     "IF_COMPRESS": False,
     "IGNORE_PATTERNS": [""],
 }
+
+DAY_NAMES = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 def read_env():
     try:
@@ -60,10 +61,10 @@ def read_env():
             except ValueError as e:
                 raise ValueError("DAYS_TO_RUN must be defined as string with comma as separator, eg. \"1,3,5\" where 1 is Monday, 3 is Wednesday and so on...")
             
-            if day in range(1, 8) and day not in days_array:
+            if day in range(0, 7) and day not in days_array:
                 days_array.append(day)
             else:
-                raise ValueError("Allowed day vales are form 1 to 7, values must be unique")
+                raise ValueError("Allowed day vales are form 0 to 6, values must be unique")
             
         days_array.sort()
         config["DAYS_TO_RUN"] = days_array  
@@ -129,7 +130,7 @@ def get_source_size() -> int:
     return size
     
 def get_target_space() -> int:
-    return shutil.disk_usage('/source').free
+    return shutil.disk_usage('/target').free
     
 def format_file_size(size, decimals=2, binary_system=True):
     if binary_system:
@@ -172,13 +173,15 @@ def _create_raw_copy_() -> str:
         return today
     
 def _copy_owner_group_(target: str) -> None:
-    logger.debug("Changing permissions in target dir according to source")
+    logger.info("Changing permissions in %s dir according to /source", target)
     
     target_path = os.path.join('/target', target)    
     source_stat = os.stat('/source')
     logger.debug("Source stats: %s", source_stat)
     shutil.chown(target_path, source_stat.st_uid, source_stat.st_gid)
-        
+    
+    start_time = perf_counter()    
+    
     for path, dirs, files in os.walk(target_path):
         if path != target_path:
             src_dir_path = path.replace(target_path, '/source')
@@ -192,6 +195,9 @@ def _copy_owner_group_(target: str) -> None:
             src_file_path_stat = os.stat(src_file_path)
             logger.debug("Changing permissions for file: %s to owner: %s, group %s", dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
             shutil.chown(dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
+    
+    end_time = perf_counter()        
+    logger.info("Permission changed. Took %s seconds",  round(end_time - start_time, 2))
 
 def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
     backup_dir = os.path.join("/target", from_dir)
@@ -199,6 +205,7 @@ def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
         logger.error("Cannot create archive from not existing directory. Directory name: \"%s\". Skipping iteration")
         return False
     
+    logger.info("Creating %s archive", format)
     start_time = perf_counter()
     archive_name = shutil.make_archive(backup_dir, format, '/target', from_dir, logger=logger)
     shutil.chown(archive_name, config["PUID"], config["PGID"])
@@ -212,6 +219,9 @@ def _create_archive_(from_dir: str, archive_list: list, format: str) -> bool:
     
 def run_backup():
     logger.info("Backup started at %s", datetime.datetime.today())
+    
+    start_time = perf_counter()
+    
     check_paths()
     source_size = get_source_size()
     target_space = get_target_space()
@@ -239,7 +249,7 @@ def run_backup():
         except FileNotFoundError:
             pass
         
-        if not _create_archive_(name, archive_list, "7zip"):
+        if not _create_archive_(name, archive_list, "gztar"):
             return
                 
         if len(archive_list) > 0:
@@ -279,24 +289,24 @@ def run_backup():
             logger.debug("Removing old directory: %s", old_backup)
             shutil.rmtree(os.path.join('/target', old_backup))
     
-            
+    end_time = perf_counter()
+    logger.info("Backup %s created. Took %s", name, round(end_time - start_time, 2))            
     logger.debug("Running garbage collection: %s", gc_collect())
 
 def main():    
-    logger.warning("Script is starting")
-            
+    logger.warning("Script is starting")      
     read_env()    
+            
     logger.info(config)
     check_paths()
-
-    logger.debug("Registering 7zip as archive format")
-    shutil.register_archive_format('7zip', py7zr.pack_7zarchive, description='7zip archive')
         
     try:
+        days_string = ','.join([DAY_NAMES[day] for day in config["DAYS_TO_RUN"]])
+        
         sched = BlockingScheduler()
         sched.add_job(run_backup,
                       trigger=CronTrigger(
-                          day_of_week=config["DAYS_TO_RUN"],
+                          day_of_week=days_string,
                           hour=config["HOUR"],
                           minute=config["MINUTE"]),
                       id='backup',
