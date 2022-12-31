@@ -53,13 +53,14 @@ def read_env():
     
     try:
         days = os.environ["DAYS_TO_RUN"]
+        days = days.replace('"', '')
         days = days.split(',')
         days_array = []
         for day in days:
             try:
                 day = int(day)
             except ValueError as e:
-                raise ValueError("DAYS_TO_RUN must be defined as string with comma as separator, eg. \"1,3,5\" where 1 is Monday, 3 is Wednesday and so on...")
+                raise ValueError("DAYS_TO_RUN must be defined as string with comma as separator, eg. \"1,3,5\" where 0 is Monday, 3")
             
             if day in range(0, 7) and day not in days_array:
                 days_array.append(day)
@@ -99,6 +100,7 @@ def read_env():
     
     try:
         patterns = os.environ["IGNORE_PATTERNS"]
+        patterns = patterns.replace('"', '')
         patterns = patterns.split(',')
         patterns_array = []
         for pattern in patterns:
