@@ -73,7 +73,9 @@ def read_env():
         pass
     
     try:
-        config["HOUR"] = int(os.environ['HOUR'])
+        hour = os.environ['HOUR']
+        hour = hour.replace('"', '')
+        config["HOUR"] = int(hour)
     except KeyError:
         pass
     except ValueError as e:
@@ -82,7 +84,9 @@ def read_env():
         raise ValueError ("HOUR must be a number and be greater or equal to 0 and lesser than 24")
     
     try:
-        config["MINUTE"] = int(os.environ['MINUTE'])
+        minute = os.environ['MINUTE']
+        minute = minute.replace('"', '')
+        config["MINUTE"] = int(minute)
     except KeyError:
         pass
     except ValueError as e:
@@ -91,6 +95,8 @@ def read_env():
         raise ValueError ("MINUTE must be a number and be greater or equal to 0 and lesser than 60")       
     
     try:
+        if_compress = os.environ['IF_COMPRESS'].lower()
+        if_compress = if_compress.replace('"', '')
         config["IF_COMPRESS"] = True if os.environ['IF_COMPRESS'].lower() in ['true', 'yes', '1'] else False
     except KeyError:
         pass
