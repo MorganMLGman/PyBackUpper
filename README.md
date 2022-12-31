@@ -50,3 +50,6 @@ services:
 - Removed unnecessary requirement
 - Upgraded pip version
 - Upgraded wheel and setuptools
+
+### [v1.0.5](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/61115320?tag=1.0.5)
+- Fix for `"` character in docker-compose environment
