@@ -1,0 +1,23 @@
+version: "3.9"
+services:
+  pybackupper:
+    image: ghcr.io/morganmlgman/pybackupper:latest # or morganmlg/pybackupper:tagname
+    container_name: pybackupper
+
+    restart: always
+    mem_reservation: 2g # optional, but recommended
+    mem_limit: 4g # optional, but recommended 
+
+    volumes:
+      - /etc/localtime:/etc/localtime:ro # needed to run backups with localtime 
+      - /path/to/your/stuff:/source:ro # path to your directory with things you want to backup
+      - /path/to/your/drive:/target # path to the destination where you want to keep backups
+      - /path/to/logs:/logs # path to directory where you want to keep logs
+
+    environment: # OPTIONAL, default no compression, run every two days at 3AM, 7 runs before deleting
+      - IF_COMPRESS=true # if compress backup directory after copying data, currently only .tar.gz but will be more
+      - RUNS_TO_KEEP=5 # number of runs to keep before deleting the oldest one
+      - DAYS_TO_RUN="0,1,2,3,4,5,6" # days to run, 0 is monday, 6 is sunday, must be in format X,Y,Z and raising order
+      - HOUR="2" # hour to run, format 24H, range from 0 to 23
+      - MINUTE="30" # minute to run, range from 0 to 59
+      - IGNORE_PATTERNS="*.log, *.tar" # files with that extensions will be ignored from backup, format "item1, item2, item3"
