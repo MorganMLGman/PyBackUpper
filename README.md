@@ -53,4 +53,3 @@ services:
 - Removed unnecessary requirement
 - Upgraded pip version
 - Upgraded wheel and setuptools
-- 
