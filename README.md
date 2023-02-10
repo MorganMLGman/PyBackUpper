@@ -46,10 +46,10 @@ services:
 ```
 
 ## Changelog
-### [v1.0.6](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/61115320?tag=1.0.6)
+### [v1.0.6](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/69702337?tag=1.0.6)
 - Fix for file not found exception with empty symlinks
   
-### [v1.0.5](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/61115320?tag=1.0.5)
+### [v1.0.5](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/61117765?tag=1.0.5)
 - Fix for `"` character in docker-compose environment
 
 ### [v1.0.2](https://github.com/MorganMLGman/PyBackUpper/pkgs/container/pybackupper/61115320?tag=1.0.2)
