@@ -133,9 +133,12 @@ def get_source_size() -> int:
     for path, dirs, files in os.walk('/source'):
         for file in files:
             file_path = os.path.join(path, file)
+            if os.path.islink(file_path):
+                continue
             size += os.path.getsize(file_path)
             
     return size
+
     
 def get_target_space() -> int:
     return shutil.disk_usage('/target').free
@@ -175,7 +178,7 @@ def _create_raw_copy_() -> str:
         return
     else:
         start_time = perf_counter()
-        shutil.copytree('/source', backup_dir, ignore=shutil.ignore_patterns(*config["IGNORE_PATTERNS"]))
+        shutil.copytree('/source', backup_dir, symlinks=True, ignore=shutil.ignore_patterns(*config["IGNORE_PATTERNS"]), ignore_dangling_symlinks=True)
         end_time = perf_counter()
         logger.info("Raw copy saved to \"%s\". Took %s seconds", backup_dir, round(end_time - start_time, 2))
         return today
@@ -200,7 +203,10 @@ def _copy_owner_group_(target: str) -> None:
         for file in files:
             dst_file_path = os.path.join(path, file)
             src_file_path = dst_file_path.replace(target_path, '/source')
-            src_file_path_stat = os.stat(src_file_path)
+            if os.path.islink(src_file_path):
+                continue
+            else:
+                src_file_path_stat = os.stat(src_file_path)
             logger.debug("Changing permissions for file: %s to owner: %s, group %s", dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
             shutil.chown(dst_file_path, src_file_path_stat.st_uid, src_file_path_stat.st_gid)
     
