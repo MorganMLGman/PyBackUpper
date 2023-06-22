@@ -7,6 +7,7 @@ import datetime
 from time import perf_counter
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from s3_handler import S3Handler
 
 config = {
     "PUID": 1000,
