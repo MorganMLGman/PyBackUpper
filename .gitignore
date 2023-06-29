@@ -135,5 +135,11 @@ dmypy.json
 .test-logs
 test.cmd
 
-./source
-./target
+# ignore all files in source directory
+source/*
+
+# ignore all files in target directory
+target/*
+
+# ignore all files in logs directory
+logs/*
