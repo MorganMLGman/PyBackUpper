@@ -134,3 +134,6 @@ dmypy.json
 .test-target
 .test-logs
 test.cmd
+
+./source
+./target
