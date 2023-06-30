@@ -25,11 +25,12 @@ class S3Handler:
         if object_name is None:
             object_name = os.path.basename(file_name)
         
+        self.logger.debug(f"Uploading file {file_name} to {object_name}")
         try:
             _ = self.client.upload_file(file_name, self.bucket_name, object_name, ExtraArgs={'ACL': self.acl})
             self.logger.debug(f"File {file_name} uploaded successfully")
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
         
@@ -37,6 +38,7 @@ class S3Handler:
         if object_name is None:
             object_name = os.path.basename(directory_path)
             
+        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
         try:
             for path, _, files in os.walk(directory_path):
                 for file in files:
@@ -47,7 +49,7 @@ class S3Handler:
                     self.upload_file(__local_file, __s3file)
                     self.logger.debug(" ...Success")
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             raise e
     
     def delete_file(self, file_name):
@@ -55,7 +57,7 @@ class S3Handler:
             _ = self.client.delete_object(Bucket=self.bucket_name, Key=file_name)
             self.logger.debug(f"File {file_name} deleted successfully")
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
     
@@ -63,9 +65,11 @@ class S3Handler:
         try:
             response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=directory_path)
             for content in response['Contents']:
-                self.delete_file(content['Key'])
+                if content['Key'].find('/') != -1:
+                    self.logger.debug(f"Deleting file {content['Key']}")
+                    self.delete_file(content['Key'])
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
     
@@ -76,7 +80,7 @@ class S3Handler:
             for bucket in response['Buckets']:
                 self.logger.debug(f"Bucket: {bucket['Name']}")
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
     
@@ -93,7 +97,7 @@ class S3Handler:
                 if content['Key'].find('/') == -1:
                     files.append(content['Key'])
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return []
         return files
     
@@ -109,7 +113,7 @@ class S3Handler:
                     content['Prefix'] = content['Prefix'].replace(prefix, '')
                 directories.append(content['Prefix'].replace('/', ''))
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return []
         return directories
     
@@ -125,7 +129,7 @@ class S3Handler:
                     content['Key'] = content['Key'].replace(prefix, '')
                 tree.append(content['Key'])
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return []
         return tree
     
@@ -137,7 +141,7 @@ class S3Handler:
             _ = self.client.download_file(self.bucket_name, object_name, file_path)
             self.logger.debug(f"File {file_path} downloaded successfully")
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
     
@@ -153,6 +157,6 @@ class S3Handler:
                     os.makedirs(path)
                 self.download_file(os.path.join(path, os.path.basename(content['Key'])), content['Key'])
         except Exception as e:
-            self.logger.error(e)
+            self.logger.error(e, exc_info=True)
             return False
         return True
