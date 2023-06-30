@@ -90,7 +90,8 @@ class S3Handler:
             for content in response['Contents']:
                 if prefix is not None:
                     content['Key'] = content['Key'].replace(prefix, '')
-                files.append(content['Key'])
+                if content['Key'].find('/') == -1:
+                    files.append(content['Key'])
         except Exception as e:
             self.logger.error(e)
             return []
@@ -106,7 +107,7 @@ class S3Handler:
             for content in response.get('CommonPrefixes', []):
                 if prefix is not None:
                     content['Prefix'] = content['Prefix'].replace(prefix, '')
-                directories.append(content['Prefix'])
+                directories.append(content['Prefix'].replace('/', ''))
         except Exception as e:
             self.logger.error(e)
             return []
