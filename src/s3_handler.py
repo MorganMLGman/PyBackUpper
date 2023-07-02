@@ -160,3 +160,33 @@ class S3Handler:
             self.logger.error(e, exc_info=True)
             return False
         return True
+
+    def get_bucket_size(self):
+        try:
+            response = self.client.list_objects_v2(Bucket=self.bucket_name)
+            size = 0
+            for content in response['Contents']:
+                size += content['Size']
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            return 0
+        return size
+    
+    def check_file_exists(self, file_name):
+        try:
+            _ = self.client.head_object(Bucket=self.bucket_name, Key=file_name)
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            return False
+        return True
+    
+    def check_directory_exists(self, directory_path):
+        try:
+            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=directory_path)
+            for content in response['Contents']:
+                if content['Key'].find('/') != -1:
+                    return True
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            return False
+        return False

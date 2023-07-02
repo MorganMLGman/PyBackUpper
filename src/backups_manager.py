@@ -15,6 +15,7 @@ import shutil
 from datetime import datetime
 from s3_handler import S3Handler
 from time import perf_counter
+import math
 
 class BackupManager():
     def __init__(self, 
@@ -572,8 +573,180 @@ class BackupManager():
         
         return True
     
-    def perform_backup(self):
+    def convert_to_human_readable(self, size: int) -> str:
+        """Function to convert a size in bytes to human readable format
+
+        Args:
+            size (int): Size in bytes
+
+        Returns:
+            str: Size in human readable format
+        """
+        if size == 0:
+            return "0B"
+        
+        power = int(math.log(size, 1024))
+        units = ["B", "KB", "MB", "GB", "TB", "PB"]
+        converted_size = round(size / 1024**power, 2)
+        
+        return f"{converted_size}{units[power]}"
+    
+    def get_backup_dir_size(self, backup_dir: str=None) -> int:
+        """Function to get the size of a backup directory
+
+        Args:
+            backup_dir (str, optional): Custom backup directory to get the size from. Defaults to None.
+
+        Raises:
+            FileNotFoundError: Exception raised if the backup directory does not exist
+
+        Returns:
+            int: Size of the backup directory in bytes
+        """
+        if backup_dir is None:
+            backup_dir = self.target_path
+            
+        if not os.path.exists(backup_dir):
+            self.logger.error(f"Backup directory {backup_dir} does not exist")
+            raise FileNotFoundError(f"Backup directory {backup_dir} does not exist")        
+        
+        backup_dir_size = 0
+        for root, _, files in os.walk(backup_dir):
+            for file in files:
+                backup_dir_size += os.path.getsize(os.path.join(root, file))
+                
+        self.logger.debug(f"Backup directory {backup_dir} size: {self.convert_to_human_readable(backup_dir_size)}")
+        
+        return backup_dir_size
+    
+    def get_last_backup_size(self) -> dict:
+        """Function to get the size of the last backup
+
+        Returns:
+            dict: Dictionary with the size of the last backup in raw and compressed format
+        """
+        backup_size = {}
+        backup_size["raw"] = self.convert_to_human_readable(self.get_backup_dir_size(os.path.join(self.target_path, self.backups["local_raw"][-1])))
+        
+        if self.backups["local_compressed"][-1].startswith(self.backups["local_raw"][-1]):
+            backup_size["compressed"] = self.convert_to_human_readable(os.path.getsize(os.path.join(self.target_path, self.backups["local_compressed"][-1])))
+        
+        return backup_size
+    
+    def get_backup_size(self) -> dict:
+        """Function to get the size of the backup directory and the S3 bucket
+
+        Returns:
+            dict: Dictionary with the size of the backup directory and the S3 bucket
+        """
+        backup_size = {}
+        
+        backup_size["local"] = self.convert_to_human_readable(self.get_backup_dir_size())
+        
+        if self.s3handler is not None:
+            backup_size["s3"] = self.convert_to_human_readable(self.s3handler.get_bucket_size())
+            
+        return backup_size
+    
+    def get_backup_dir_free_space(self, backup_dir: str=None) -> int:
+        """Function to get the free space in the backup directory
+
+        Args:
+            backup_dir (str, optional): Path to the backup directory. Defaults to None.
+
+        Raises:
+            FileNotFoundError: Exception raised if the backup directory does not exist
+
+        Returns:
+            int: Free space in the backup directory
+        """
+        if backup_dir is None:
+            backup_dir = self.target_path
+            
+        if not os.path.exists(backup_dir):
+            self.logger.error(f"Backup directory {backup_dir} does not exist")
+            raise FileNotFoundError(f"Backup directory {backup_dir} does not exist")        
+        
+        backup_dir_free_space = shutil.disk_usage(backup_dir).free
+        
+        self.logger.debug(f"Backup directory free space: {self.convert_to_human_readable(backup_dir_free_space)}")
+        
+        return backup_dir_free_space
+    
+    def get_source_dir_size(self, source_path:str=None) -> int:
+        """Function to get the size of the source directory
+
+        Args:
+            source_path (str, optional): Path to the source directory. Defaults to None.
+
+        Raises:
+            FileNotFoundError: Exception raised if the source directory does not exist
+
+        Returns:
+            int: Size of the source directory in bytes
+        """
+        if source_path is None:
+            source_path = self.source_path
+        
+        if not os.path.exists(source_path):
+            self.logger.error(f"Source directory {source_path} does not exist")
+            raise FileNotFoundError(f"Source directory {source_path} does not exist")
+        
+        source_dir_size = 0
+        for root, _, files in os.walk(source_path):
+            for file in files:
+                source_dir_size += os.path.getsize(os.path.join(root, file))
+                
+        self.logger.debug(f"Source directory: {source_path} size: {self.convert_to_human_readable(source_dir_size)}")
+        
+        return source_dir_size
+    
+    def check_if_enough_free_space(self, with_archive:bool=True) -> bool:
+        """Function to check if there is enough free space in the backup directory
+
+        Args:
+            with_archive (bool, optional): If True, the size of the archive will be checked. Defaults to True.
+
+        Returns:
+            bool: True if there is enough free space, False otherwise
+        """
+        source_dir_size = self.get_source_dir_size()
+        target_dir_free_space = self.get_backup_dir_free_space()
+        
+        if with_archive:
+            return source_dir_size * 2 < target_dir_free_space
+        return source_dir_size < target_dir_free_space
+    
+    def get_backup_info(self) -> dict:
+        """Function to get information about the backup
+
+        Returns:
+            dict: Dictionary with information about the backup
+        """
+        backup_info = {}
+        backup_info["backup_dir_free_space"] = self.convert_to_human_readable(self.get_backup_dir_free_space())
+        backup_info["last_backup"] = self.backups["local_raw"][-1]
+        backup_info["last_backup_size"] = self.get_last_backup_size()
+        backup_info["backup_size"] = self.get_backup_size()
+        
+        if self.s3handler is not None:
+            backup_info["s3_bucket_size"] = self.convert_to_human_readable(self.s3handler.get_bucket_size())
+            
+            if self.s3handler.check_directory_exists(self.backups["s3_raw"][-1]):
+                backup_info["last_s3_backup"] = self.backups["s3_raw"][-1]
+            elif self.s3handler.check_file_exists(self.backups["s3_compressed"][-1]):
+                backup_info["last_s3_backup"] = self.backups["s3_compressed"][-1]
+            else:
+                backup_info["last_s3_backup"] = "ERROR"
+                    
+        return backup_info
+        
+           
+    def perform_backup(self)-> str:
         """Function to perform a backup
+        
+        Returns:
+            str: If the backup was successful, returns string with statistics. If the backup failed, returns None
 
         Raises:
             Exception: Exception raised if any of the backup steps fails
@@ -601,4 +774,13 @@ class BackupManager():
             raise Exception("Failed to delete old backups")
         backup_end_time = perf_counter()
         
-        self.logger.info(f"Backup performed in {round(backup_end_time - backup_start_time, 2)} seconds, raw backup took {round(compress_start_time - backup_start_time, 2)} seconds, compression took {round(compress_end_time - compress_start_time, 2)} seconds, upload took {round(upload_end_time - upload_start_time, 2)} seconds, deletion took {round(backup_end_time - upload_end_time, 2)} seconds")
+        response = f"\
+Backup performed in {round(backup_end_time - backup_start_time, 2)} seconds, \
+raw backup took {round(compress_start_time - backup_start_time, 2)} seconds, \
+compression took {round(compress_end_time - compress_start_time, 2)} seconds, \
+upload to S3 took {round(upload_end_time - upload_start_time, 2)} seconds, \
+deletion took {round(backup_end_time - upload_end_time, 2)} seconds"
+                
+        self.logger.info(response)
+        
+        return response
