@@ -291,7 +291,7 @@ class BackupManager():
                 return v
         return None     
     
-    def compress_backup(self, backup_path: str = None, archive_format: str = "tar.gz") -> bool:
+    def compress_backup(self, backup_path: str = None, archive_format: str = None) -> bool:
         """Function to compress a backup
 
         Args:
@@ -311,7 +311,9 @@ class BackupManager():
             self.logger.error(f"Backup path {backup_path} does not exist")
             return False
         
-        if archive_format not in ["tar", "tar.gz", "tar.bz2", "tar.xz", "zip"]:
+        if archive_format is None:
+            archive_format = self.archive_format
+        if self.map_archive_format(archive_format) is None:
             self.logger.error(f"Archive format {archive_format} not supported")
             return False
         
@@ -326,7 +328,8 @@ class BackupManager():
                                     
         try:
             shutil_archive_format = self.map_archive_format(archive_format)
-            shutil.make_archive(backup_path, shutil_archive_format, backup_path, logger=self.logger)
+            self.logger.debug(f"Compressing backup {backup_path} to {archive_path}")
+            shutil.make_archive(backup_path, shutil_archive_format, backup_path)
             self.logger.debug(f"Backup {backup_path} compressed to {archive_path}")
         except Exception as e:
             self.logger.error(e, exc_info=True)
