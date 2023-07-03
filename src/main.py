@@ -299,4 +299,9 @@ Config:\n\
             
 if __name__ == "__main__":
     pybackupper = PyBackUpper()
-    pybackupper.backups_manager.perform_backup()
+    if pybackupper.backups_manager.perform_backup():
+        pybackupper.logger.info("Backup completed successfully.")
+        pybackupper.telegram_handler.send_backup_info(pybackupper.config["HOSTNAME"], pybackupper.backups_manager.get_backup_info())
+    else:
+        pybackupper.logger.error("Backup failed.")
+        pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Backup failed.")
