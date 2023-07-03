@@ -57,6 +57,7 @@ class TelegramHandler():
         data = {
                 "chat_id": self.chat_id, 
                 "text": message,
+                "parse_mode": "markdown"
                 }
         
         try:
@@ -64,7 +65,7 @@ class TelegramHandler():
             if response.status_code != 200:
                 self.logger.error(f"Failed to send message to Telegram chat. Status code: {response.status_code}. Response: {response.text}")
                 raise Exception(f"Failed to send message to Telegram chat. Status code: {response.status_code}")
-            self.logger.info("Message sent to Telegram chat.")
+            self.logger.debug("Message sent to Telegram chat.")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             self.logger.error("Failed to send message to Telegram chat.")
@@ -103,7 +104,7 @@ class TelegramHandler():
             if response.status_code != 200:
                 self.logger.error(f"Failed to send file to Telegram chat. Status code: {response.status_code}. Response: {response.text}")
                 raise Exception(f"Failed to send file to Telegram chat. Status code: {response.status_code}")
-            self.logger.info("File sent to Telegram chat.")
+            self.logger.debug("File sent to Telegram chat.")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             self.logger.error("Failed to send file to Telegram chat.")
@@ -142,7 +143,7 @@ class TelegramHandler():
             if response.status_code != 200:
                 self.logger.error(f"Failed to send message to Telegram chat. Status code: {response.status_code}. Response: {response.text}")
                 raise Exception(f"Failed to send message to Telegram chat. Status code: {response.status_code}")
-            self.logger.info("Message sent to Telegram chat.")
+            self.logger.debug("Message sent to Telegram chat.")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             self.logger.error("Failed to send message to Telegram chat.")
@@ -161,7 +162,7 @@ class TelegramHandler():
             if response.status_code != 200:
                 self.logger.error(f"Failed to test connection to Telegram chat. Status code: {response.status_code}. Response: {response.text}")
                 return False
-            self.logger.info("Connection to Telegram chat successful.")
+            self.logger.debug("Connection to Telegram chat successful.")
             return True
         except Exception as e:
             self.logger.error(e, exc_info=True)

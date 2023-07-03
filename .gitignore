@@ -134,7 +134,7 @@ dmypy.json
 .test-target
 .test-logs
 test.cmd
-
+test_docker_compose.yaml
 # ignore all files in source directory
 source/*
 
@@ -143,3 +143,5 @@ target/*
 
 # ignore all files in logs directory
 logs/*
+
+secrets/*

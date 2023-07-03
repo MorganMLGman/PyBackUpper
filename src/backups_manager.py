@@ -13,7 +13,6 @@ import json
 import os
 import shutil
 from datetime import datetime
-from s3_handler import S3Handler
 from time import perf_counter
 import math
 
@@ -24,7 +23,7 @@ class BackupManager():
                  target_path: str = "/target", 
                  s3handler=None, 
                  backup_info_file: str = None,
-                 compress_backup: bool = True,
+                 is_compression_enabled: bool = True,
                  archive_format: str = "tar.gz",
                  raw_backup_keep: int = 1, 
                  compressed_backup_keep: int = 7, 
@@ -66,10 +65,18 @@ class BackupManager():
         
         self.target_path = target_path
         
+        self.is_compression_enabled = is_compression_enabled
+        self.archive_format = archive_format
+        
+        if self.is_compression_enabled and self.map_archive_format(self.archive_format) is None:
+            self.logger.error(f"Archive format {self.archive_format} not supported")
+            raise ValueError(f"Archive format {self.archive_format} not supported")
+                     
         self.raw_backup_keep = raw_backup_keep
         self.compressed_backup_keep = compressed_backup_keep
         self.s3_raw_keep = s3_raw_keep
         self.s3_compressed_keep = s3_compressed_keep
+        self.ignored_extensions = ignored_extensions
         
         self.s3handler = s3handler
         
@@ -159,23 +166,24 @@ class BackupManager():
                 self.backups["local_raw"].remove(backup)
                 self.save_backup_info_to_file()
                 
-        archives = [f for f in os.listdir(target_path) if os.path.isfile(os.path.join(target_path, f))]
-        try:
-            archives.remove("backup_info.json")
-        except ValueError:
-            pass
-        
-        for archive in archives:
-            if archive not in self.backups["local_compressed"]:
-                self.logger.warning(f"Backup {archive} not listed in backup info")
-                self.backups["local_compressed"].append(archive)
-                self.save_backup_info_to_file()
-        
-        for backup in self.backups["local_compressed"]:
-            if backup not in archives:
-                self.logger.warning(f"Backup {backup} listed in backup info but not found in target path")
-                self.backups["local_compressed"].remove(backup)
-                self.save_backup_info_to_file()
+        if self.is_compression_enabled:
+            archives = [f for f in os.listdir(target_path) if os.path.isfile(os.path.join(target_path, f))]
+            try:
+                archives.remove("backup_info.json")
+            except ValueError:
+                pass
+            
+            for archive in archives:
+                if archive not in self.backups["local_compressed"]:
+                    self.logger.warning(f"Backup {archive} not listed in backup info")
+                    self.backups["local_compressed"].append(archive)
+                    self.save_backup_info_to_file()
+            
+            for backup in self.backups["local_compressed"]:
+                if backup not in archives:
+                    self.logger.warning(f"Backup {backup} listed in backup info but not found in target path")
+                    self.backups["local_compressed"].remove(backup)
+                    self.save_backup_info_to_file()
         
         if self.s3handler is not None:
             s3_directories = self.s3handler.list_directories()
@@ -192,19 +200,20 @@ class BackupManager():
                     self.backups["s3_raw"].remove(backup)
                     self.save_backup_info_to_file()
                     
-            s3_archives = self.s3handler.list_files()
-            
-            for archive in s3_archives:
-                if archive not in self.backups["s3_compressed"]:
-                    self.logger.warning(f"Backup {archive} not listed in backup info")
-                    self.backups["s3_compressed"].append(archive)
-                    self.save_backup_info_to_file()
-            
-            for backup in self.backups["s3_compressed"]:
-                if backup not in s3_archives:
-                    self.logger.warning(f"Backup {backup} listed in backup info but not found in s3")
-                    self.backups["s3_compressed"].remove(backup)
-                    self.save_backup_info_to_file()
+            if self.is_compression_enabled:
+                s3_archives = self.s3handler.list_files()
+                
+                for archive in s3_archives:
+                    if archive not in self.backups["s3_compressed"]:
+                        self.logger.warning(f"Backup {archive} not listed in backup info")
+                        self.backups["s3_compressed"].append(archive)
+                        self.save_backup_info_to_file()
+                
+                for backup in self.backups["s3_compressed"]:
+                    if backup not in s3_archives:
+                        self.logger.warning(f"Backup {backup} listed in backup info but not found in s3")
+                        self.backups["s3_compressed"].remove(backup)
+                        self.save_backup_info_to_file()
                 
         return True
         
@@ -337,6 +346,14 @@ class BackupManager():
         Returns:
             bool: True if the backup was sent to S3, False otherwise
         """
+        if self.s3handler is None:
+            self.logger.error(f"No S3 handler found")
+            return False
+        
+        if self.s3_raw_keep == 0:
+            self.logger.error(f"S3 raw backups disabled")
+            return True
+        
         if backup_path is None:
             if len(self.backups["local_raw"]) == 0:
                 self.logger.error(f"No local raw backups found")
@@ -369,6 +386,14 @@ class BackupManager():
         Returns:
             bool: True if the archive was sent to S3, False otherwise
         """
+        if self.s3handler is None:
+            self.logger.error(f"No S3 handler found")
+            return False
+        
+        if self.s3_compressed_keep == 0:
+            self.logger.error(f"S3 compressed backups disabled")
+            return True
+        
         if archive_path is None:
             if len(self.backups["local_compressed"]) == 0:
                 self.logger.error(f"No local compressed backups found")
@@ -541,7 +566,7 @@ class BackupManager():
             return True
         
         backups_to_delete = len(backups) - max_backups
-        self.logger.info(f"Deleting {backups_to_delete} old backups from {backup_type}")
+        self.logger.debug(f"Deleting {backups_to_delete} old backups from {backup_type}")
         
         for _ in range(backups_to_delete):
             match backup_type:
@@ -782,17 +807,18 @@ class BackupManager():
             raise Exception("Failed to create raw backup")
         
         compress_start_time = perf_counter()
-        if not self.compress_backup():
-            raise Exception("Failed to compress backup")
+        if self.is_compression_enabled:
+            if not self.compress_backup():
+                raise Exception("Failed to compress backup")
         compress_end_time = perf_counter()
         
         upload_start_time = perf_counter()
-        if self.s3handler is not None:    
+        if self.s3handler is not None:
             if not self.send_raw_backup_to_s3():
                 raise Exception("Failed to send raw backup to S3")
-            
-            if not self.send_archive_to_s3():
-                raise Exception("Failed to send archive to S3")
+            if self.is_compression_enabled:
+                if not self.send_archive_to_s3():
+                    raise Exception("Failed to send archive to S3")
         upload_end_time = perf_counter()
         
         if not self.delete_old_backups():

@@ -12,3 +12,5 @@ PyBackUpper.code-workspace
 source
 target
 logs
+secrets
+test_docker_compose.yaml
