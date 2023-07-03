@@ -146,5 +146,26 @@ class TelegramHandler():
         except Exception as e:
             self.logger.error(e, exc_info=True)
             self.logger.error("Failed to send message to Telegram chat.")
-            raise e 
+            raise e
+        
+    def test_connection(self) -> bool:
+        """Tests connection to Telegram chat.
+
+        Returns:
+            bool: True if connection is successful.
+        """
+        url = f"https://api.telegram.org/bot{self.token}/getMe"
+        
+        try:
+            response = requests.post(url)
+            if response.status_code != 200:
+                self.logger.error(f"Failed to test connection to Telegram chat. Status code: {response.status_code}. Response: {response.text}")
+                return False
+            self.logger.info("Connection to Telegram chat successful.")
+            return True
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            self.logger.error("Failed to test connection to Telegram chat.")
+            return False
+        
 

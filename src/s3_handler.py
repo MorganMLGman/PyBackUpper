@@ -190,3 +190,11 @@ class S3Handler:
             self.logger.error(e, exc_info=True)
             return False
         return False
+    
+    def test_connection(self) -> bool:
+        try:
+            _ = self.client.head_bucket(Bucket=self.bucket_name)
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            return False
+        return True

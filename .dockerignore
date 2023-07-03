@@ -9,3 +9,6 @@ PyBackUpper.code-workspace
 .test-logs
 .test-target
 .test-source
+source
+target
+logs

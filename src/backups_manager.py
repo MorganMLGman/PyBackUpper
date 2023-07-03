@@ -23,11 +23,14 @@ class BackupManager():
                  source_path: str = "/source", 
                  target_path: str = "/target", 
                  s3handler=None, 
-                 backup_info_file: str = None, 
+                 backup_info_file: str = None,
+                 compress_backup: bool = True,
+                 archive_format: str = "tar.gz",
                  raw_backup_keep: int = 1, 
                  compressed_backup_keep: int = 7, 
                  s3_raw_keep: int = 1, 
-                 s3_compressed_keep: int = 3):
+                 s3_compressed_keep: int = 3,
+                 ignored_extensions: list = None):
         """BackupManager class constructor
 
         Args:
@@ -276,7 +279,8 @@ class BackupManager():
                 if v == archive_format:
                     return k
             if k == archive_format:
-                return v       
+                return v
+        return None     
     
     def compress_backup(self, backup_path: str = None, archive_format: str = "tar.gz") -> bool:
         """Function to compress a backup

@@ -8,6 +8,9 @@ Raises:
 import logging
 import logging.config
 import os
+from s3_handler import S3Handler
+from telegram_handler import TelegramHandler
+from backups_manager import BackupsManager
 
 class PyBackUpper():
     """PyBackUpper class.
@@ -26,6 +29,47 @@ class PyBackUpper():
         self.logger.info("PyBackUpper initialized.")
         self.config = {}
         self.read_env()
+        
+        if self.config["S3_BUCKET"] is not None and self.config["S3_ACCESS_KEY"] is not None and self.config["S3_SECRET_KEY"] is not None:
+            self.s3_handler = S3Handler(
+                self.config["S3_BUCKET"], 
+                self.config["S3_ACCESS_KEY"], 
+                self.config["S3_SECRET_KEY"], 
+                self.config["S3_ACL"] if self.config["S3_ACL"] is not None else 'public-read',
+                self.config["S3_REGION_NAME"] if self.config["S3_REGION_NAME"] is not None else 'us-east-1',
+                self.config["S3_ENDPOINT_URL"] if self.config["S3_ENDPOINT_URL"] is not None else 'https://s3.amazonaws.com',
+                logger=self.logger)
+            if not self.s3handler.test_connection():
+                self.logger.error("S3 connection test failed. S3 upload will not be available.")
+                self.s3_handler = None
+            else:
+                self.logger.info("S3 connection test successful.")
+            
+        else:
+            self.logger.warning("S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY not set. S3 upload will not be available.")
+            self.s3_handler = None
+        
+        if self.config["TELEGRAM_BOT_TOKEN"] is not None and self.config["TELEGRAM_CHAT_ID"] is not None:
+            self.telegram_handler = TelegramHandler(self.config["TELEGRAM_BOT_TOKEN"], self.config["TELEGRAM_CHAT_ID"], logger=self.logger)
+            if not self.telegram_handler.test_connection():
+                self.logger.error("Telegram connection test failed. Telegram notifications will not be available.")
+                self.telegram_handler = None
+            else:
+                self.logger.info("Telegram connection test successful.")
+        else:
+            self.logger.warning("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not set. Telegram notifications will not be available.")
+            
+        self.backups_manager = BackupsManager(
+            logger=self.logger,
+            s3handler = self.s3_handler,
+            comress_backup = self.config["IF_COMPRESS"],
+            archive_format = self.config["ARCHIVE_FORMAT"],
+            raw_backup_keep = self.config["LOCAL_RAW_BACKUPS_KEEP"],
+            compressed_backup_keep = self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"],
+            s3_raw_keep = self.config["S3_RAW_BACKUPS_KEEP"],
+            s3_compressed_keep = self.config["S3_COMPRESSED_BACKUPS_KEEP"],
+            ignored_extensions = self.config["IGNORED_EXTENSIONS"]
+        )
         
     def read_env(self):
         """Reads environment variables and stores them in self.config.
@@ -99,14 +143,17 @@ class PyBackUpper():
             self.logger.warning("IF_COMPRESS not set. Defaulting to true.")
             self.config["IF_COMPRESS"] = True
             
-        try:
-            self.config["ARCHIVE_FORMAT"] = os.environ['ARCHIVE_FORMAT']
-            if self.config["ARCHIVE_FORMAT"] not in ["tar.gz", "tar.bz2", "tar.xz", "zip"]:
-                self.logger.error("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip, not %s", self.config["ARCHIVE_FORMAT"])
-                raise ValueError("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip")
-        except KeyError:
-            self.logger.warning("ARCHIVE_FORMAT not set. Defaulting to tar.gz.")
-            self.config["ARCHIVE_FORMAT"] = "tar.gz"
+        if self.config["IF_COMPRESS"]:
+            try:
+                self.config["ARCHIVE_FORMAT"] = os.environ['ARCHIVE_FORMAT']
+                if self.config["ARCHIVE_FORMAT"] not in ["tar.gz", "tar.bz2", "tar.xz", "zip"]:
+                    self.logger.error("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip, not %s", self.config["ARCHIVE_FORMAT"])
+                    raise ValueError("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip")
+            except KeyError:
+                self.logger.warning("ARCHIVE_FORMAT not set. Defaulting to tar.gz.")
+                self.config["ARCHIVE_FORMAT"] = "tar.gz"
+        else:
+            self.config["ARCHIVE_FORMAT"] = None
             
         try:
             self.config["LOCAL_RAW_BACKUPS_KEEP"] = int(os.environ['LOCAL_RAW_BACKUPS_KEEP'])
@@ -117,14 +164,17 @@ class PyBackUpper():
             self.logger.warning("LOCAL_RAW_BACKUPS_KEEP not set. Defaulting to 1.")
             self.config["LOCAL_RAW_BACKUPS_KEEP"] = 1
             
-        try:
-            self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] = int(os.environ['LOCAL_COMPRESSED_BACKUPS_KEEP'])
-            if self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] < 0:
-                self.logger.error("Value of LOCAL_COMPRESSED_BACKUPS_KEEP must be at least 0, not %s", self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"])
-                raise ValueError("Value of LOCAL_COMPRESSED_BACKUPS_KEEP must be at least 0")
-        except KeyError:
-            self.logger.warning("LOCAL_COMPRESSED_BACKUPS_KEEP not set. Defaulting to 1.")
-            self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] = 1
+        if self.config["IF_COMPRESS"]:
+            try:
+                self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] = int(os.environ['LOCAL_COMPRESSED_BACKUPS_KEEP'])
+                if self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] < 0:
+                    self.logger.error("Value of LOCAL_COMPRESSED_BACKUPS_KEEP must be at least 0, not %s", self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"])
+                    raise ValueError("Value of LOCAL_COMPRESSED_BACKUPS_KEEP must be at least 0")
+            except KeyError:
+                self.logger.warning("LOCAL_COMPRESSED_BACKUPS_KEEP not set. Defaulting to 1.")
+                self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] = 1
+        else:
+            self.config["LOCAL_COMPRESSED_BACKUPS_KEEP"] = 0
             
         try:
             self.config["S3_RAW_BACKUPS_KEEP"] = int(os.environ['S3_RAW_BACKUPS_KEEP'])
@@ -135,13 +185,16 @@ class PyBackUpper():
             self.logger.warning("S3_RAW_BACKUPS_KEEP not set. Defaulting to 0.")
             self.config["S3_RAW_BACKUPS_KEEP"] = 0
             
-        try:
-            self.config["S3_COMPRESSED_BACKUPS_KEEP"] = int(os.environ['S3_COMPRESSED_BACKUPS_KEEP'])
-            if self.config["S3_COMPRESSED_BACKUPS_KEEP"] < 0:
-                self.logger.error("Value of S3_COMPRESSED_BACKUPS_KEEP must be at least 0, not %s", self.config["S3_COMPRESSED_BACKUPS_KEEP"])
-                raise ValueError("Value of S3_COMPRESSED_BACKUPS_KEEP must be at least 0")
-        except KeyError:
-            self.logger.warning("S3_COMPRESSED_BACKUPS_KEEP not set. Defaulting to 0.")
+        if self.config["IF_COMPRESS"]:
+            try:
+                self.config["S3_COMPRESSED_BACKUPS_KEEP"] = int(os.environ['S3_COMPRESSED_BACKUPS_KEEP'])
+                if self.config["S3_COMPRESSED_BACKUPS_KEEP"] < 0:
+                    self.logger.error("Value of S3_COMPRESSED_BACKUPS_KEEP must be at least 0, not %s", self.config["S3_COMPRESSED_BACKUPS_KEEP"])
+                    raise ValueError("Value of S3_COMPRESSED_BACKUPS_KEEP must be at least 0")
+            except KeyError:
+                self.logger.warning("S3_COMPRESSED_BACKUPS_KEEP not set. Defaulting to 0.")
+                self.config["S3_COMPRESSED_BACKUPS_KEEP"] = 0
+        else:
             self.config["S3_COMPRESSED_BACKUPS_KEEP"] = 0
         
         try:
