@@ -591,6 +591,28 @@ class BackupManager():
         
         return f"{converted_size}{units[power]}"
     
+    def convert_time_to_human_readable(self, time: float) -> str:
+        """Function to convert time in seconds to human readable format
+
+        Args:
+            time (float): Time in seconds
+
+        Returns:
+            str: Time in human readable format
+        """
+        if time == 0:
+            return "0s"
+        
+        power = int(math.log(time, 60))
+        units = ["s", "m", "h"]
+        if power < 0:
+            power = 0
+        if power > len(units) - 1:
+            power = len(units) - 1
+        converted_time = round(time / 60**power, 2)
+        
+        return f"{converted_time}{units[power]}"
+    
     def get_backup_dir_size(self, backup_dir: str=None) -> int:
         """Function to get the size of a backup directory
 
@@ -740,7 +762,6 @@ class BackupManager():
                 backup_info["last_s3_backup"] = "ERROR"
                     
         return backup_info
-        
            
     def perform_backup(self)-> str:
         """Function to perform a backup
@@ -775,12 +796,12 @@ class BackupManager():
         backup_end_time = perf_counter()
         
         response = f"\
-Backup performed in {round(backup_end_time - backup_start_time, 2)} seconds, \
-raw backup took {round(compress_start_time - backup_start_time, 2)} seconds, \
-compression took {round(compress_end_time - compress_start_time, 2)} seconds, \
-upload to S3 took {round(upload_end_time - upload_start_time, 2)} seconds, \
-deletion took {round(backup_end_time - upload_end_time, 2)} seconds"
-                
+Backup performed in {self.convert_time_to_human_readable(backup_end_time - backup_start_time)}, \
+raw backup took {self.convert_time_to_human_readable(compress_start_time - backup_start_time)}, \
+compression took {self.convert_time_to_human_readable(compress_end_time - compress_start_time)}, \
+upload to S3 took {self.convert_time_to_human_readable(upload_end_time - upload_start_time)}, \
+deletion took {self.convert_time_to_human_readable(backup_end_time - upload_end_time)}"
+
         self.logger.info(response)
         
         return response
