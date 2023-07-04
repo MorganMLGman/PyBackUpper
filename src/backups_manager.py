@@ -336,7 +336,20 @@ class BackupManager():
         try:
             shutil_archive_format = self.map_archive_format(archive_format)
             self.logger.debug(f"Compressing backup {backup_path} to {archive_path}")
-            shutil.make_archive(backup_path, shutil_archive_format, backup_path)
+            # shutil.make_archive(backup_path, shutil_archive_format, backup_path)
+
+            match archive_format:
+                case "tar":
+                    os.system(f"tar -cf {archive_path} {backup_path}")
+                case "tar.gz":
+                    os.system(f"tar -czf {archive_path} {backup_path}")
+                case "tar.bz2":
+                    os.system(f"tar -cjf {archive_path} {backup_path}")
+                case "tar.xz":
+                    os.system(f"tar -cJf {archive_path} {backup_path}")
+                case "zip":
+                    os.system(f"zip -r {archive_path} {backup_path}")
+                                
             self.logger.debug(f"Backup {backup_path} compressed to {archive_path}")
         except Exception as e:
             self.logger.error(e, exc_info=True)
