@@ -1,6 +1,8 @@
 # PyBackUpper
 **Docker containerized Python application for creating backups.**
 
+[![CodeFactor](https://www.codefactor.io/repository/github/morganmlgman/pybackupper/badge)](https://www.codefactor.io/repository/github/morganmlgman/pybackupper)
+
  - [Features](https://github.com/MorganMLGman/PyBackUpper#features)
  - [Docker-compose](https://github.com/MorganMLGman/PyBackUpper#docker-compose)
  - [Changelog](https://github.com/MorganMLGman/PyBackUpper#changelog)
