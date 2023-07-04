@@ -91,7 +91,7 @@ def read_env():
     except KeyError:
         pass
     except ValueError as e:
-        raise ValueError ("MINUTE must be a number and be greater or equal to 0 and lesser than 60")  from e
+        raise ValueError ("MINUTE must be a number and be greater or equal to 0 and lesser than 60") from e
     if config["MINUTE"] < 0 and config["MINUTE"] >= 60:
         raise ValueError ("MINUTE must be a number and be greater or equal to 0 and lesser than 60")       
     
