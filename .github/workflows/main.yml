@@ -26,7 +26,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
-      
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
@@ -56,5 +56,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      

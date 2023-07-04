@@ -6,10 +6,10 @@ services:
 
     restart: always
     mem_reservation: 2g # optional, but recommended
-    mem_limit: 4g # optional, but recommended 
+    mem_limit: 4g # optional, but recommended
 
     volumes:
-      - /etc/localtime:/etc/localtime:ro # needed to run backups with localtime 
+      - /etc/localtime:/etc/localtime:ro # needed to run backups with localtime
       - /path/to/your/stuff:/source:ro # path to your directory with things you want to backup
       - /path/to/your/drive:/target # path to the destination where you want to keep backups
       - /path/to/logs:/logs # path to directory where you want to keep logs
