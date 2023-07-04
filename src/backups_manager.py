@@ -15,6 +15,7 @@ import shutil
 from datetime import datetime
 from time import perf_counter
 import math
+from multiprocessing import cpu_count
 
 class BackupManager():
     def __init__(self, 
@@ -29,7 +30,9 @@ class BackupManager():
                  compressed_backup_keep: int = 7, 
                  s3_raw_keep: int = 1, 
                  s3_compressed_keep: int = 3,
-                 ignored_extensions: list = None):
+                 ignored_extensions: list = None,
+                 puid: int = None,
+                 pgid: int = None,):
         """BackupManager class constructor
 
         Args:
@@ -250,21 +253,44 @@ class BackupManager():
             return True
                 
         try:
-            shutil.copytree(source_path, backup_path, symlinks=True, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns(self.ignore_patterns))
+            shutil.copytree(source_path, backup_path, symlinks=True, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns(*self.ignored_extensions))
             self.logger.debug(f"Backup {backup_name} created")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False
-            
-        try:
-            shutil.copystat(source_path, backup_path, follow_symlinks=True)
-            self.logger.debug(f"Backup {backup_name} permissions copied")
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
         
-        self.backups["local_raw"].append(backup_name)
-        self.save_backup_info_to_file()
+        shutil.chown
+            
+        for root, dirs, files in os.walk(backup_path):
+            for file in files:
+                try:
+                    source_file = os.path.join(root.replace(backup_path, self.source_path), file)
+                    source_file_stat = os.stat(source_file)
+                    target_file = os.path.join(root, file)
+                    self.logger.debug(f"Copying stats from {source_file} to {target_file}")
+                    shutil.copymode(source_file, target_file)
+                    self.logger.debug(f"Chowning {target_file} to {source_file_stat.st_uid}:{source_file_stat.st_gid}")
+                    shutil.chown(target_file, user=source_file_stat.st_uid, group=source_file_stat.st_gid)
+                except Exception as e:
+                    self.logger.error(e, exc_info=True)
+                    return False
+            
+            for dir in dirs:
+                try:
+                    source_dir = os.path.join(root.replace(backup_path, self.source_path), dir)
+                    source_dir_stat = os.stat(source_dir)
+                    target_dir = os.path.join(root, dir)
+                    self.logger.debug(f"Copying stats from {source_dir} to {target_dir}")
+                    shutil.copymode(source_dir, target_dir)
+                    self.logger.debug(f"Chowning {target_dir} to {source_dir_stat.st_uid}:{source_dir_stat.st_gid}")
+                    shutil.chown(target_dir, user=source_dir_stat.st_uid, group=source_dir_stat.st_gid)
+                except Exception as e:
+                    self.logger.error(e, exc_info=True)
+                    return False
+        
+        if backup_name not in self.backups["local_raw"]:           
+            self.backups["local_raw"].append(backup_name)
+            self.save_backup_info_to_file()
         
         return True
     
@@ -338,17 +364,19 @@ class BackupManager():
             self.logger.debug(f"Compressing backup {backup_path} to {archive_path}")
             # shutil.make_archive(backup_path, shutil_archive_format, backup_path)
 
+            archive_path = os.path.basename(archive_path)
+
             match archive_format:
                 case "tar":
                     os.system(f"tar -cf {archive_path} {backup_path}")
                 case "tar.gz":
-                    os.system(f"tar -czf {archive_path} {backup_path}")
+                    os.system(f"""cd {backup_path} && tar --use-compress-program="pigz -9 -N" -cf {archive_path} ./""")
                 case "tar.bz2":
                     os.system(f"tar -cjf {archive_path} {backup_path}")
                 case "tar.xz":
-                    os.system(f"tar -cJf {archive_path} {backup_path}")
+                    os.system(f"""tar --use-compress-program="pixz -9" -cf {archive_path} {backup_path}""")
                 case "zip":
-                    os.system(f"zip -r {archive_path} {backup_path}")
+                    os.system(f"""tar --use-compress-program="pigz -9 -N --zip" -cf {archive_path} {backup_path}""")
                                 
             self.logger.debug(f"Backup {backup_path} compressed to {archive_path}")
         except Exception as e:

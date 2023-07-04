@@ -72,11 +72,11 @@ class PyBackUpper():
             ignored_extensions = self.config["IGNORED_EXTENSIONS"]
         )
         
-        if self.telegram_handler:
-            self.telegram_handler.send_message(f"\
-PyBackUpper initialized.\n\n\
-Config:\n\
-`{self.print_config()}`")
+#         if self.telegram_handler:
+#             self.telegram_handler.send_message(f"\
+# PyBackUpper initialized.\n\n\
+# Config:\n\
+# `{self.print_config()}`")
         
     def read_env(self):
         """Reads environment variables and stores them in self.config.
@@ -153,9 +153,9 @@ Config:\n\
         if self.config["COMPRESSION_ENABLED"]:
             try:
                 self.config["ARCHIVE_FORMAT"] = os.environ['ARCHIVE_FORMAT'].strip().replace('"', '')
-                if self.config["ARCHIVE_FORMAT"] not in ["tar.gz", "tar.bz2", "tar.xz", "zip"]:
-                    self.logger.error("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip, not %s", self.config["ARCHIVE_FORMAT"])
-                    raise ValueError("ARCHIVE_FORMAT must be one of tar.gz, tar.bz2, tar.xz, zip")
+                if self.config["ARCHIVE_FORMAT"] not in ["tar", "tar.gz", "tar.bz2", "tar.xz", "zip"]:
+                    self.logger.error("ARCHIVE_FORMAT must be one of tar, tar.gz, tar.bz2, tar.xz, zip, not %s", self.config["ARCHIVE_FORMAT"])
+                    raise ValueError("ARCHIVE_FORMAT must be one of tar, tar.gz, tar.bz2, tar.xz, zip")
             except KeyError:
                 self.logger.warning("ARCHIVE_FORMAT not set. Defaulting to tar.gz.")
                 self.config["ARCHIVE_FORMAT"] = "tar.gz"
@@ -299,9 +299,14 @@ Config:\n\
             
 if __name__ == "__main__":
     pybackupper = PyBackUpper()
-    if pybackupper.backups_manager.perform_backup():
-        pybackupper.logger.info("Backup completed successfully.")
-        pybackupper.telegram_handler.send_backup_info(pybackupper.config["HOSTNAME"], pybackupper.backups_manager.get_backup_info())
-    else:
-        pybackupper.logger.error("Backup failed.")
-        pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Backup failed.")
+    try:
+        response = pybackupper.backups_manager.perform_backup()
+        if response is not None and response != "":
+            pybackupper.logger.info("Backup completed successfully.")
+            pybackupper.telegram_handler.send_backup_info(pybackupper.config["HOSTNAME"], pybackupper.backups_manager.get_backup_info())
+        else:
+            pybackupper.logger.error("Backup failed.")
+            pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Backup failed.")
+    except Exception as e:
+        pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Error occured while creating a backup. " + str(e))
+        pybackupper.logger.exception("Error occured while creating a backup.")
