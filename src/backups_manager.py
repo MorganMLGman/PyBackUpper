@@ -248,10 +248,17 @@ class BackupManager():
                 self.backups["local_raw"].append(backup_name)
                 self.save_backup_info_to_file()
             return True
-        
+                
         try:
-            os.system(f"cp -rp {source_path} {backup_path}")
+            shutil.copytree(source_path, backup_path, symlinks=True, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns(self.ignore_patterns))
             self.logger.debug(f"Backup {backup_name} created")
+        except Exception as e:
+            self.logger.error(e, exc_info=True)
+            return False
+            
+        try:
+            shutil.copystat(source_path, backup_path, follow_symlinks=True)
+            self.logger.debug(f"Backup {backup_name} permissions copied")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False
