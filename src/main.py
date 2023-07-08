@@ -373,10 +373,15 @@ class PyBackUpper():
         def index():
             next_run = cron_trigger.get_next_fire_time(datetime.now(), datetime.now())
             backup_info = backup_info_formatter()
+            
+            try:
+                last_backup = datetime.strptime(backup_info["last_backup"], "%Y_%m_%d_%H_%M_%S").strftime("%Y_%m_%d %H:%M:%S")
+            except ValueError:
+                last_backup = backup_info["last_backup"]
             return render_template("index.html", 
                                    hostname=self.config["HOSTNAME"],
                                    next_backup=next_run.strftime("%Y_%m_%d %H:%M:%S"),
-                                   last_backup=datetime.strptime(backup_info["last_backup"], "%Y_%m_%d_%H_%M_%S").strftime("%Y_%m_%d %H:%M:%S"),
+                                   last_backup=last_backup,
                                    local_size=backup_info["local_size"],
                                    s3_size=backup_info["s3_size"],
                                    free_space=backup_info["free_space"],

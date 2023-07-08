@@ -715,15 +715,18 @@ class BackupManager():
             raise FileNotFoundError(f"Backup directory {backup_dir} does not exist")        
         
         backup_dir_size = 0
-        for root, _, files in os.walk(backup_dir):
-            for file in files:
-                try:
-                    backup_dir_size += os.path.getsize(os.path.join(root, file))
-                except FileNotFoundError as e:
-                    self.logger.error(f"File {os.path.join(root, file)} not found")
-                except Exception as e:
-                    self.logger.error(e, exc_info=True)
-                    raise e
+        
+        backup_dir_size = shutil.disk_usage(backup_dir).used
+        
+        # for root, _, files in os.walk(backup_dir):
+        #     for file in files:
+        #         try:
+        #             backup_dir_size += os.path.getsize(os.path.join(root, file))
+        #         except FileNotFoundError as e:
+        #             self.logger.error(f"File {os.path.join(root, file)} not found")
+        #         except Exception as e:
+        #             self.logger.error(e, exc_info=True)
+        #             raise e
                 
         self.logger.debug(f"Backup directory {backup_dir} size: {self.convert_to_human_readable(backup_dir_size)}")
         
