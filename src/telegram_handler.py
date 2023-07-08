@@ -110,7 +110,7 @@ class TelegramHandler():
             self.logger.error("Failed to send file to Telegram chat.")
             raise e 
         
-    def send_backup_info(self, hostname:str, backup_info:dict):
+    def send_backup_info(self, hostname:str, response:str, backup_info:dict):
         """Sends backup info to Telegram chat.
 
         Args:
@@ -127,6 +127,10 @@ class TelegramHandler():
             self.logger.error("Hostname is empty.")
             raise ValueError("Hostname is empty.")
         
+        if response is None or response == "":
+            self.logger.error("Response is empty.")
+            raise ValueError("Response is empty.")
+        
         if backup_info is None or backup_info == {}:
             self.logger.error("Backup info is empty.")
             raise ValueError("Backup info is empty.")
@@ -134,7 +138,7 @@ class TelegramHandler():
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         data = {
                 "chat_id": self.chat_id, 
-                "text": f"""*PyBackUpper*\n*Hostname: {hostname}*\n\nBackup info:\n`{pformat(backup_info)}`""",
+                "text": f"""*PyBackUpper*\n*Hostname: {hostname}*\n\nOutput: {response}\n\nBackup info:\n`{pformat(backup_info)}`""",
                 "parse_mode": "markdown",
                 }
         

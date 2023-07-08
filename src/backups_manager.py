@@ -358,32 +358,34 @@ class BackupManager():
                 self.backups["local_compressed"].append(os.path.basename(archive_path))
                 self.save_backup_info_to_file()
             return True  
-                                    
+    
+        archive_name = os.path.basename(archive_path)    
+                                       
         try:
             shutil_archive_format = self.map_archive_format(archive_format)
             self.logger.debug(f"Compressing backup {backup_path} to {archive_path}")
             # shutil.make_archive(backup_path, shutil_archive_format, backup_path)
-
-            archive_path = os.path.basename(archive_path)
-
+            
             match archive_format:
                 case "tar":
-                    os.system(f"tar -cf {archive_path} {backup_path}")
+                    command = f"tar -cf {archive_path} {backup_path}"
                 case "tar.gz":
-                    os.system(f"""cd {backup_path} && tar --use-compress-program="pigz -9 -N" -cf {archive_path} ./""")
+                    command = f"""tar --use-compress-program="pigz -9 -N" -cf {archive_path} {backup_path}"""
                 case "tar.bz2":
-                    os.system(f"tar -cjf {archive_path} {backup_path}")
+                    command = f"tar -cjf {archive_path} {backup_path}"
                 case "tar.xz":
-                    os.system(f"""tar --use-compress-program="pixz -9" -cf {archive_path} {backup_path}""")
+                    command = f"""tar --use-compress-program="pixz -9" -cf {archive_path} {backup_path}"""
                 case "zip":
-                    os.system(f"""tar --use-compress-program="pigz -9 -N --zip" -cf {archive_path} {backup_path}""")
-                                
-            self.logger.debug(f"Backup {backup_path} compressed to {archive_path}")
+                    command = f"""tar --use-compress-program="pigz -9 -N --zip" -cf {archive_path} {backup_path}"""
+                                    
+            os.system(command)               
+                
+            self.logger.debug(f"Backup {backup_path} compressed to {archive_name}")
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False
         
-        self.backups["local_compressed"].append(os.path.basename(archive_path))
+        self.backups["local_compressed"].append(os.path.basename(archive_name))
         self.save_backup_info_to_file()
         
         return True
@@ -735,7 +737,7 @@ class BackupManager():
         
         return backup_size
     
-    def get_backup_size(self) -> dict:
+    def get_backups_size(self) -> dict:
         """Function to get the size of the backup directory and the S3 bucket
 
         Returns:
@@ -749,6 +751,22 @@ class BackupManager():
             backup_size["s3"] = self.convert_to_human_readable(self.s3handler.get_bucket_size())
             
         return backup_size
+    
+    def get_backup_size(self, backup:str) -> int:
+        """Function to get the size of a backup
+
+        Args:
+            backup (str): Name of the backup
+
+        Returns:
+            int: Size of the backup in bytes
+        """
+        if backup in self.backups["local_raw"]:
+            return self.get_backup_dir_size(os.path.join(self.target_path, backup))
+        elif backup in self.backups["local_compressed"]:
+            return os.path.getsize(os.path.join(self.target_path, backup))
+        
+        return 0        
     
     def get_backup_dir_free_space(self, backup_dir: str=None) -> int:
         """Function to get the free space in the backup directory
@@ -829,17 +847,24 @@ class BackupManager():
         backup_info["backup_dir_free_space"] = self.convert_to_human_readable(self.get_backup_dir_free_space())
         backup_info["last_backup"] = self.backups["local_raw"][-1]
         backup_info["last_backup_size"] = self.get_last_backup_size()
-        backup_info["backup_size"] = self.get_backup_size()
+        backup_info["backup_size"] = self.get_backups_size()
         
         if self.s3handler is not None:
             backup_info["s3_bucket_size"] = self.convert_to_human_readable(self.s3handler.get_bucket_size())
-            
-            if self.s3handler.check_directory_exists(self.backups["s3_raw"][-1]):
-                backup_info["last_s3_backup"] = self.backups["s3_raw"][-1]
-            elif self.s3handler.check_file_exists(self.backups["s3_compressed"][-1]):
-                backup_info["last_s3_backup"] = self.backups["s3_compressed"][-1]
-            else:
-                backup_info["last_s3_backup"] = "ERROR"
+                
+            try:
+                if self.s3handler.check_directory_exists(self.backups["s3_raw"][-1]):
+                    backup_info["last_s3_backup"] = self.backups["s3_raw"][-1]
+            except Exception:
+                try:
+                    if self.s3handler.check_file_exists(self.backups["s3_compressed"][-1]):
+                        backup_info["last_s3_backup"] = self.backups["s3_compressed"][-1]
+                except Exception:
+                    pass
+            finally:
+                if backup_info.get("last_s3_backup", None) is not None:
+                    backup_info["last_s3_backup_size"] = "ERROR"
+                
                     
         return backup_info
            

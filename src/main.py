@@ -12,10 +12,18 @@ from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
 from backups_manager import BackupManager
 from pprint import pformat
+from flask import Flask, render_template
+import threading
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime
 
 class PyBackUpper():
     """PyBackUpper class.
     """
+    
+    DAY_NAMES = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+    
     def __init__(self, logger:logging.Logger=None):
         """PyBackUpper constructor.
 
@@ -295,18 +303,87 @@ class PyBackUpper():
             config["TELEGRAM_CHAT_ID"] = "********"
             
         return pformat(config, sort_dicts=False)
+    
+    def create_backup(self):
+        try:
+            response = pybackupper.backups_manager.perform_backup()
+            if response is not None and response != "":
+                pybackupper.logger.info("Backup completed successfully.")
+                pybackupper.telegram_handler.send_backup_info(pybackupper.config["HOSTNAME"], response, pybackupper.backups_manager.get_backup_info())
+            else:
+                pybackupper.logger.error("Backup failed.")
+                pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Backup failed.")
+        except Exception as e:
+            pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Error occured while creating a backup.")
+            pybackupper.logger.exception("Error occured while creating a backup.")
+
+    def run(self):
+        days_string = ','.join([self.DAY_NAMES[day] for day in self.config["DAYS_TO_RUN"]])
         
+        sched = BlockingScheduler()
+        cron_trigger = CronTrigger(
+                          day_of_week=days_string,
+                          hour=self.config["HOUR"],
+                          minute=self.config["MINUTE"])
+        sched.add_job(self.create_backup,
+                      trigger=cron_trigger,
+                      id='backup',
+                      name='Create backup',
+                      replace_existing=True)
+        
+        self.display_webpage(cron_trigger)
+        self.logger.info("Next backup will be created on " + cron_trigger.get_next_fire_time(datetime.now(), datetime.now()).strftime("%d/%m/%Y %H:%M:%S"))
+        if self.telegram_handler is not None:
+            self.telegram_handler.send_message(self.config["HOSTNAME"] + ": PyBackUpper started. Next backup will be created on " + cron_trigger.get_next_fire_time(datetime.now(), datetime.now()).strftime("%d/%m/%Y %H:%M:%S"))
+        sched.start()
+    
+    def display_webpage(self, cron_trigger: CronTrigger):
+        self.logger.info("Starting web server.")
+                
+        app = Flask(__name__, template_folder="templates")
+        
+        def backup_info_formatter() -> dict:
+            formatted_backup = dict()
+            info = self.backups_manager.get_backup_info()
+            formatted_backup["last_backup"] = info["last_backup"]
+            formatted_backup["local_size"] = info["backup_size"]["local"]
+            formatted_backup["s3_size"] = info["backup_size"]["s3"] if info["backup_size"]["s3"] is not None else "N/A"
+            formatted_backup["free_space"] = info["backup_dir_free_space"]
+            
+            backups = []
+            all_backups = set()
+            for content in self.backups_manager.backups.values():
+                for item in content:
+                    all_backups.add(item)
+                        
+            for backup in sorted(all_backups, reverse=True, key=lambda x:x.split(".")[0]):
+                item = dict()
+                item["name"] = backup
+                item['size'] = self.backups_manager.convert_to_human_readable(self.backups_manager.get_backup_size(backup))
+                item["local"] = True if backup in self.backups_manager.backups["local_raw"] or backup in self.backups_manager.backups["local_compressed"] else False
+                item["s3"] = True if backup in self.backups_manager.backups["s3_raw"] or backup in self.backups_manager.backups["s3_compressed"] else False
+                
+                backups.append(item)
+            
+            formatted_backup["backups"] = backups
+            
+            return formatted_backup        
+        
+        @app.route("/")
+        def index():
+            next_run = cron_trigger.get_next_fire_time(datetime.now(), datetime.now())
+            backup_info = backup_info_formatter()
+            return render_template("index.html", 
+                                   hostname=self.config["HOSTNAME"],
+                                   next_backup=next_run.strftime("%Y_%m_%d %H:%M:%S"),
+                                   last_backup=datetime.strptime(backup_info["last_backup"], "%Y_%m_%d_%H_%M_%S").strftime("%Y_%m_%d %H:%M:%S"),
+                                   local_size=backup_info["local_size"],
+                                   s3_size=backup_info["s3_size"],
+                                   free_space=backup_info["free_space"],
+                                   backups=backup_info["backups"])
+        server_thread = threading.Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": 5000, "debug": False, "use_reloader": False, "threaded": True})
+        server_thread.start()
             
 if __name__ == "__main__":
-    pybackupper = PyBackUpper()
-    try:
-        response = pybackupper.backups_manager.perform_backup()
-        if response is not None and response != "":
-            pybackupper.logger.info("Backup completed successfully.")
-            pybackupper.telegram_handler.send_backup_info(pybackupper.config["HOSTNAME"], pybackupper.backups_manager.get_backup_info())
-        else:
-            pybackupper.logger.error("Backup failed.")
-            pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Backup failed.")
-    except Exception as e:
-        pybackupper.telegram_handler.send_message(pybackupper.config["HOSTNAME"] + ": Error occured while creating a backup. " + str(e))
-        pybackupper.logger.exception("Error occured while creating a backup.")
+    pybackupper = PyBackUpper()    
+    pybackupper.run()

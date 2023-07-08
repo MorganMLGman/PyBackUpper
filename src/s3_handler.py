@@ -96,6 +96,8 @@ class S3Handler:
                     content['Key'] = content['Key'].replace(prefix, '')
                 if content['Key'].find('/') == -1:
                     files.append(content['Key'])
+        except KeyError:
+            return []
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return []
@@ -112,6 +114,8 @@ class S3Handler:
                 if prefix is not None:
                     content['Prefix'] = content['Prefix'].replace(prefix, '')
                 directories.append(content['Prefix'].replace('/', ''))
+        except KeyError:
+            return []
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return []
@@ -167,9 +171,11 @@ class S3Handler:
             size = 0
             for content in response['Contents']:
                 size += content['Size']
+        except KeyError:
+            return 0
         except Exception as e:
             self.logger.error(e, exc_info=True)
-            return 0
+            raise e
         return size
     
     def check_file_exists(self, file_name):
@@ -186,6 +192,8 @@ class S3Handler:
             for content in response['Contents']:
                 if content['Key'].find('/') != -1:
                     return True
+        except KeyError:
+            return False
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False

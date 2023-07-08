@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+<html>
+ 
+<head>
+    <title>PyBackUpper</title>
+    {% block styles %}
+    <link rel="stylesheet"  type="text/css" href="{{url_for('.static', filename='style.css')}}">        
+    {% endblock %}
+</head>
+ 
+<body>
+{% block body %}
+    <h1 class="inline">PyBackUpper</h1>
+
+    <button class="inline align-right" onclick="window.location.href='/backup'">Backup now</button>
+
+    <h2>Hostname: {{hostname}}</h2>
+
+    <h3>Last backup: {{last_backup}}</h3>
+    <h3>Next backup: {{next_backup}}</h3>
+
+    <p>Local size: {{local_size}}</p>
+    <p>Free space: {{free_space}}</p>
+    <p>S3 size: {{s3_size}}</p>
+
+    <table>
+        <tr>
+            <th>Backup</th>
+            <th>Size</th>
+            <th>Local</th>
+            <th>S3</th>
+        </tr>
+        {% for backup in backups %}
+        <tr>
+            <td>{{ backup.name }}</td>
+            <td>{{ backup.size }}</td>
+            <td>{% if backup.local == True %}✅{% else %}❌{% endif %}</td>
+            <td>{% if backup.s3 == True %}✅{% else %}❌{% endif %}</td>
+        </tr>
+        {% endfor %} 
+    </table>
+{% endblock %}
+ 
+</body>
+ 
+</html>

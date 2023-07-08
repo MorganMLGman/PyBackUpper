@@ -1,0 +1,35 @@
+table, th, td {
+    border: 1px solid black;
+    border-collapse: collapse;
+    text-align: center;
+    width: 100%;
+  }
+
+  th, td {
+    padding: 15px;
+  }
+
+tr:nth-child(odd)   { background-color:#eee; }
+tr:nth-child(even)    { background-color:#fff; }
+
+  button {
+    padding: 15px 20px;
+    margin: 8px 0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    cursor: pointer;
+  }
+
+.inline {
+  display: inline;
+}
+
+.align-right {
+  /* make element input align right */
+  float: right;
+}
+
+button:hover{
+    background: #383;
+}
