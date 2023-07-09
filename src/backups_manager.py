@@ -258,9 +258,7 @@ class BackupManager():
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False
-        
-        shutil.chown
-            
+                
         for root, dirs, files in os.walk(backup_path):
             for file in files:
                 try:
@@ -271,6 +269,8 @@ class BackupManager():
                     shutil.copymode(source_file, target_file)
                     self.logger.debug(f"Chowning {target_file} to {source_file_stat.st_uid}:{source_file_stat.st_gid}")
                     shutil.chown(target_file, user=source_file_stat.st_uid, group=source_file_stat.st_gid)
+                except FileNotFoundError:
+                    self.logger.error(f"File {source_file} not found")
                 except Exception as e:
                     self.logger.error(e, exc_info=True)
                     return False
@@ -284,6 +284,8 @@ class BackupManager():
                     shutil.copymode(source_dir, target_dir)
                     self.logger.debug(f"Chowning {target_dir} to {source_dir_stat.st_uid}:{source_dir_stat.st_gid}")
                     shutil.chown(target_dir, user=source_dir_stat.st_uid, group=source_dir_stat.st_gid)
+                except FileNotFoundError:
+                    self.logger.error(f"Directory {source_dir} not found")
                 except Exception as e:
                     self.logger.error(e, exc_info=True)
                     return False
