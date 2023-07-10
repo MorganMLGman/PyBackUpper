@@ -47,10 +47,10 @@ class S3Handler:
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
                 for path, _, files in os.walk(directory_path):
                     for file in files:                        
-                        __s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
-                        __local_file = os.path.join(path, file)
-                        self.logger.debug("upload : %s to Target: %s", __local_file, __s3file)
-                        executor.submit(self.upload_file, __local_file, __s3file)
+                        s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
+                        local_file = os.path.join(path, file)
+                        self.logger.debug(f"upload : {local_file} to target: {s3file}")
+                        executor.submit(self.upload_file, local_file, s3file)
         except Exception as e:
             self.logger.error(e, exc_info=True)
             raise e
@@ -169,6 +169,7 @@ class S3Handler:
         return True
 
     def get_bucket_size(self):
+        # TODO: Fix this, now it is only getting the size of the files in the root of the bucket and not the size of the bucket
         try:
             response = self.client.list_objects_v2(Bucket=self.bucket_name)
             size = 0
