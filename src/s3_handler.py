@@ -39,13 +39,12 @@ class S3Handler:
         if object_name is None:
             object_name = os.path.basename(directory_path)
             
-        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")               
-        num_threads = os.cpu_count()
-        dest_path = path.replace(directory_path,"")
-        
+        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
+
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2*os.cpu_count()) as executor:
                 for path, _, files in os.walk(directory_path):
+                    dest_path = path.replace(directory_path, "")
                     for file in files:                        
                         s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
                         local_file = os.path.join(path, file)
@@ -67,10 +66,11 @@ class S3Handler:
     def delete_directory(self, directory_path):
         try:
             response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=directory_path)
-            for content in response['Contents']:
-                if content['Key'].find('/') != -1:
-                    self.logger.debug(f"Deleting file {content['Key']}")
-                    self.delete_file(content['Key'])
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2*os.cpu_count()) as executor:
+                for content in response['Contents']:
+                    if content['Key'].find('/') != -1:
+                        self.logger.debug(f"Deleting file {content['Key']}")
+                        executor.submit(self.delete_file, content['Key'])
         except Exception as e:
             self.logger.error(e, exc_info=True)
             return False
@@ -171,10 +171,9 @@ class S3Handler:
     def get_bucket_size(self):
         # TODO: Fix this, now it is only getting the size of the files in the root of the bucket and not the size of the bucket
         try:
+            # Get size of whole bucket
             response = self.client.list_objects_v2(Bucket=self.bucket_name)
-            size = 0
-            for content in response['Contents']:
-                size += content['Size']
+            size = sum([content['Size'] for content in response['Contents']])
         except KeyError:
             return 0
         except Exception as e:
