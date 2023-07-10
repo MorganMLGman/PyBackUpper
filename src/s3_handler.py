@@ -2,6 +2,7 @@ import boto3
 import logging
 import logging.config
 import os
+import concurrent.futures
 
 class S3Handler:
     def __init__(self, bucket_name, access_key, secret_key, acl='public-read', region='us-east-1', url='https://s3.amazonaws.com', logger: logging.Logger = None):
@@ -38,16 +39,18 @@ class S3Handler:
         if object_name is None:
             object_name = os.path.basename(directory_path)
             
-        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
+        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")               
+        num_threads = os.cpu_count()
+        dest_path = path.replace(directory_path,"")
+        
         try:
-            for path, _, files in os.walk(directory_path):
-                for file in files:
-                    dest_path = path.replace(directory_path,"")
-                    __s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
-                    __local_file = os.path.join(path, file)
-                    self.logger.debug("upload : %s to Target: %s", __local_file, __s3file)
-                    self.upload_file(__local_file, __s3file)
-                    self.logger.debug(" ...Success")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+                for path, _, files in os.walk(directory_path):
+                    for file in files:                        
+                        __s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
+                        __local_file = os.path.join(path, file)
+                        self.logger.debug("upload : %s to Target: %s", __local_file, __s3file)
+                        executor.submit(self.upload_file, __local_file, __s3file)
         except Exception as e:
             self.logger.error(e, exc_info=True)
             raise e
