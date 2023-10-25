@@ -14,3 +14,4 @@ target
 logs
 secrets
 test_docker_compose.yaml
+src/log_dev.py
