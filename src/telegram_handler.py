@@ -1,11 +1,10 @@
 import logging
 import logging.config
-from singleton import Singleton
 import requests
 from os.path import exists, isfile
 
 
-class TelegramHandler(metaclass=Singleton):
+class TelegramHandler():
     def __init__(self, token:str, chat_id:str, logger:logging.Logger=None) -> None:
         
         self.logger = logger       
