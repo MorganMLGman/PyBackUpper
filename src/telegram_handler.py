@@ -2,9 +2,9 @@ import logging
 import logging.config
 import requests
 from os.path import exists, isfile
+from singleton import Singleton
 
-
-class TelegramHandler():
+class TelegramHandler(metaclass=Singleton):
     def __init__(self, token:str, chat_id:str, logger:logging.Logger=None) -> None:
         
         self.logger = logger       
@@ -69,7 +69,7 @@ class TelegramHandler():
             self.logger.error(f"Telegram connection test failed. Exception: {e}.")
             return False
         
-    def send_message(self, message:str, silent:bool=False, markdown:bool=False, html:bool=False):
+    def send_message(self, message:str, silent:bool=False, markdown:bool=False, html:bool=False) -> None:
         """Sends message to Telegram chat.
 
         Args:
@@ -116,7 +116,7 @@ class TelegramHandler():
             self.logger.exception("Failed to send message to Telegram chat.")
             raise e
         
-    def send_file(self, file_path:str, caption:str=None, silent:bool=False):
+    def send_file(self, file_path:str, caption:str=None, silent:bool=False) -> None:
         """Sends file to Telegram chat.
 
         Args:

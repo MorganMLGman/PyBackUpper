@@ -145,3 +145,5 @@ target/*
 logs/*
 
 secrets/*
+
+*.png.bkp
