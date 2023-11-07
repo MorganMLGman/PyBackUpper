@@ -130,9 +130,9 @@ dmypy.json
 
 .vscode
 *.code-workspace
-.test-source
-.test-target
-.test-logs
+test-source/*
+test-target/*
+test-logs/*
 test.cmd
 test_docker_compose.yaml
 # ignore all files in source directory
@@ -148,3 +148,4 @@ secrets/*
 
 *.png.bkp
 *.png.dtmp
+.sync-exclude.lst
