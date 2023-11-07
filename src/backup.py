@@ -3,11 +3,13 @@ import logging.config
 import inspect
 import shutil
 from os import walk
-from os.path import exists, join, normpath
-from tools import size_to_human_readable
-from zipfile import ZipFile, ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA
+from os.path import exists, join, normpath, getsize
+from tools import size_to_human_readable, timeit
+from zipfile import ZipFile, ZIP_BZIP2
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import cpu_count
+from hashlib import md5, sha256, sha512, sha1
 
 class Backup():
     def __init__(self, name:str, dest_path:str, ignored:str = None, logger:logging.Logger=None) -> None:
@@ -255,10 +257,28 @@ class Backup():
             self.logger.error(f"Backup {backup_path} does not exist.")
             raise FileNotFoundError(f"Backup {backup_path} does not exist.")
         
-        size = sum(os.path.getsize(join(root, file)) for root, dirs, files in os.walk(backup_path) for file in files)
-        
+        size = sum(getsize(join(root, file)) for root, dirs, files in walk(backup_path) for file in files)
         self.logger.debug(f"Raw size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
+        return size
+    
+    def get_compressed_size(self) -> int:
+        """Returns compressed size of the backup.
+
+        Raises:
+            FileNotFoundError: Backup does not exist.
+
+        Returns:
+            int: Compressed size of the backup.
+        """
+        backup_path = join(self.dest_path, self.name)
+        self.logger.debug(f"Getting compressed size of the backup {self.name}.")
         
+        if not exists(f"{backup_path}.zip"):
+            self.logger.error(f"Backup {backup_path}.zip does not exist.")
+            raise FileNotFoundError(f"Backup {backup_path}.zip does not exist.")
+        
+        size = getsize(f"{backup_path}.zip")
+        self.logger.debug(f"Compressed size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
         return size
 
 
@@ -300,26 +320,33 @@ class Backup():
         self.logger.debug(f"Backup {self.name} completed.")
         
     def _add_to_zip(self, lock: Lock, handle: ZipFile, file_paths_batch: list) -> None:
-            
-            file_data = []
-            backup_path = join(self.dest_path, self.name)
-            for file_path in file_paths_batch:
-                with open(join(backup_path, file_path), 'r') as f:
-                    file_data.append(f.read())
-                    
-            with lock:
-                for file_path, data in zip(file_paths_batch, file_data):
-                    handle.writestr(file_path, data)
-                    print(f"Added {file_path} to zip.")
-    
-    def compress_raw_backup(self) -> None:
+        """Adds files to the zip file.
+
+        Args:
+            lock (Lock): Lock for the zip file.
+            handle (ZipFile): Zip file handle.
+            file_paths_batch (list): List of file paths to add to the zip file.
+        """
+        backup_path = normpath(join(self.dest_path, self.name))           
         
+        with lock:
+            for file_path in file_paths_batch:
+                handle.write(file_path, normpath(file_path).replace(backup_path, "").lstrip("\\").lstrip("/"))
+    
+    def compress_raw_backup(self) -> None:   
+        """Compresses raw backup to the zip file.
+
+        Raises:
+            FileNotFoundError: Backup is not completed.
+            FileNotFoundError: Zip file was not created.
+        """
+             
         if not self.completed:
             self.logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
         
         if self.compressed:
-            self.logger.warning(f"Backup {self.name} is already compressed. Nothing to do 😍.")
+            self.logger.info(f"Backup {self.name} is already compressed. Nothing to do 😍.")
             return
 
         self.logger.debug(f"Compressing raw backup {self.name}.")
@@ -327,23 +354,174 @@ class Backup():
         
         file_paths = []
         
-        for root, dirs, files in walk(backup_path):
+        for root, _, files in walk(backup_path):
             for file in files:
-                file_paths.append(normpath(join(root, file).lstrip(backup_path)))
-        
+                file_paths.append(normpath(join(root, file)))
+                
         lock = Lock()
         
-        n_workers = 20        
+        n_workers = cpu_count() * 2
+        
+        self.logger.debug(f"Using {n_workers} workers to compress the backup.")
+              
         chunk_size = len(file_paths) // n_workers
+        if chunk_size == 0:
+            chunk_size = 1
                 
-        with ZipFile(f"{backup_path}.zip", 'w', compression=ZIP_DEFLATED) as handle:
-            with ThreadPoolExecutor(n_workers) as executor:
+        with ZipFile(f"{backup_path}.zip", 'w', compression=ZIP_BZIP2) as handle:
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
                 for i in range(0, len(file_paths), chunk_size):
                     
                     file_paths_batch = file_paths[i:i+chunk_size]
                                         
                     _ = executor.submit(self._add_to_zip, lock, handle, file_paths_batch)
+                    
+        if not exists(f"{backup_path}.zip"):
+            self.logger.error(f"Zip file {backup_path}.zip was not created.")
+            raise FileNotFoundError(f"Zip file {backup_path}.zip was not created.")
         
+        self.compressed = True
+        self.logger.debug(f"Backup {self.name} compressed.")
+        
+    def delete_raw_backup(self) -> None:
+        """Deletes raw backup.
+
+        Raises:
+            FileNotFoundError: Backup is not completed.
+        """
+        if not self.completed:
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        
+        self.logger.debug(f"Deleting raw backup {self.name}.")
+        backup_path = join(self.dest_path, self.name)
+        
+        shutil.rmtree(backup_path)
+        
+        self.completed = False
+        self.logger.debug(f"Backup {self.name} deleted.")
+        
+    def delete_compressed_backup(self) -> None:
+        """Deletes compressed backup.
+
+        Raises:
+            FileNotFoundError: Backup is not completed.
+        """
+        if not self.completed:
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        
+        self.logger.debug(f"Deleting compressed backup {self.name}.")
+        backup_path = join(self.dest_path, self.name)
+        
+        shutil.rmtree(f"{backup_path}.zip")
+        
+        self.compressed = False
+        self.logger.debug(f"Backup {self.name} deleted.")
+        
+    def delete_backup(self) -> None:
+        """Deletes backup.
+
+        Raises:
+            FileNotFoundError: Backup is not completed.
+        """
+        if not self.completed:
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        
+        self.logger.debug(f"Deleting backup {self.name}.")
+        backup_path = join(self.dest_path, self.name)
+        
+        shutil.rmtree(backup_path)
+        shutil.rmtree(f"{backup_path}.zip")
+        
+        self.completed = False
+        self.compressed = False
+        self.logger.debug(f"Backup {self.name} deleted.")
+        
+    def restore_backup_from_raw(self, dest_path:str) -> None:
+        """Restores backup from raw.
+
+        Args:
+            dest_path (str): Destination path of the backup.
+
+        Raises:
+            FileExistsError: Backup is already completed.
+            FileNotFoundError: Backup does not exist.
+            shutil.Error: Backup failed.
+        """
+        if self.completed:
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileExistsError(f"Backup {self.name} is not completed.")
+        
+        backup_path = join(self.dest_path, self.name)
+        
+        if not exists(backup_path):
+            self.logger.error(f"Backup {backup_path} does not exist.")
+            raise FileNotFoundError(f"Backup {backup_path} does not exist.")
+                
+        try:
+            self.logger.debug(f"Restoring backup {self.name} from raw to {dest_path}.")
+            shutil.copytree(backup_path, 
+                            dest_path, 
+                            symlinks=True,
+                            dirs_exist_ok=True,
+                            ignore_dangling_symlinks=True)
+        except shutil.Error as e:
+            self.logger.exception(f"Backup {self.name} failed. Exception: {e}.")
+            raise e
+    
+        self.completed = True
+        self.logger.debug(f"Backup {self.name} completed.")
+        
+    def unpack_compressed(self) -> None:
+        """Unpacks compressed backup.
+
+        Raises:
+            FileNotFoundError: Zip file was not created.
+        """        
+        if not self.compressed or not exists(f"{self.dest_path}.zip"):
+            self.logger.error(f"Backup {self.name} is not compressed.")
+            raise FileNotFoundError(f"Backup {self.name} is not compressed.")
+        
+        self.logger.debug(f"Unpacking compressed backup {self.name}.")
+        backup_path = join(self.dest_path, self.name)
+        
+        with ZipFile(f"{backup_path}.zip", 'r') as handle:
+            handle.extractall(backup_path)
+        
+        self.completed = True
+        
+        self.logger.debug(f"Backup {self.name} unpacked.")
+    
+    def calculate_raw_md5(self) -> str:
+        """Calculates MD5 hash of the raw backup.
+
+        Returns:
+            str: MD5 hash of the raw backup.
+        """
+        backup_path = join(self.dest_path, self.name)
+        
+        md5_hash = md5()
+        
+        for root, _, files in walk(backup_path):
+            for file in files:
+                with open(join(root, file), "rb") as handle:
+                    md5_hash.update(handle.read())
+        
+        md5_hash = md5_hash.hexdigest()
+        
+        self.logger.debug(f"MD5 hash of the raw backup {self.name} is {md5_hash}.")
+        return md5_hash
+
+                
+shutil.rmtree("../test-target/test", ignore_errors=True)
+shutil.rmtree("../test-target/test.zip", ignore_errors=True)
+
 backup = Backup(name="test", dest_path="../test-target")
 backup.create_raw_backup(src_path="../test-source")
+backup.calculate_raw_md5()
 backup.compress_raw_backup()
+backup.delete_raw_backup()
+backup.unpack_compressed()
+backup.calculate_raw_md5()
