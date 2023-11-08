@@ -4,7 +4,7 @@ import inspect
 import shutil
 from os import walk
 from os.path import exists, join, normpath, getsize
-from tools import size_to_human_readable, timeit
+from tools import size_to_human_readable
 from zipfile import ZipFile, ZIP_BZIP2
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
@@ -280,6 +280,27 @@ class Backup():
         size = getsize(f"{backup_path}.zip")
         self.logger.debug(f"Compressed size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
         return size
+    
+    def get_size(self) -> int:
+        """Returns size of the backup.
+
+        Returns:
+            int: Size of the backup.
+        """       
+        try:
+            raw_size = self.get_raw_size() if self.completed else 0
+        except FileNotFoundError:
+            raw_size = 0
+        
+        try:
+            compressed_size = self.get_compressed_size() if self.compressed else 0
+        except FileNotFoundError:
+            compressed_size = 0
+        
+        size = raw_size + compressed_size
+        
+        self.logger.debug(f"Size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
+        return size
 
 
     def create_raw_backup(self, src_path:str) -> None:
@@ -439,31 +460,27 @@ class Backup():
         self.compressed = False
         self.logger.debug(f"Backup {self.name} deleted.")
         
-    def restore_backup_from_raw(self, dest_path:str) -> None:
+    def restore_backup_from_raw(self, restore_path:str) -> None:
         """Restores backup from raw.
 
         Args:
-            dest_path (str): Destination path of the backup.
+            restore_path (str): Destination path of the backup.
 
         Raises:
             FileExistsError: Backup is already completed.
             FileNotFoundError: Backup does not exist.
             shutil.Error: Backup failed.
         """
-        if self.completed:
-            self.logger.error(f"Backup {self.name} is not completed.")
-            raise FileExistsError(f"Backup {self.name} is not completed.")
-        
         backup_path = join(self.dest_path, self.name)
         
-        if not exists(backup_path):
-            self.logger.error(f"Backup {backup_path} does not exist.")
-            raise FileNotFoundError(f"Backup {backup_path} does not exist.")
+        if not self.completed or not exists(backup_path):
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileExistsError(f"Backup {self.name} is not completed.")
                 
         try:
-            self.logger.debug(f"Restoring backup {self.name} from raw to {dest_path}.")
+            self.logger.debug(f"Restoring backup {self.name} from raw to {restore_path}.")
             shutil.copytree(backup_path, 
-                            dest_path, 
+                            restore_path, 
                             symlinks=True,
                             dirs_exist_ok=True,
                             ignore_dangling_symlinks=True)
@@ -480,7 +497,8 @@ class Backup():
         Raises:
             FileNotFoundError: Zip file was not created.
         """        
-        if not self.compressed or not exists(f"{self.dest_path}.zip"):
+        backup_path = join(self.dest_path, self.name)
+        if not self.compressed or not exists(f"{backup_path}.zip"):
             self.logger.error(f"Backup {self.name} is not compressed.")
             raise FileNotFoundError(f"Backup {self.name} is not compressed.")
         
@@ -494,34 +512,137 @@ class Backup():
         
         self.logger.debug(f"Backup {self.name} unpacked.")
     
-    def calculate_raw_md5(self) -> str:
-        """Calculates MD5 hash of the raw backup.
+    def calculate_raw_hash(self, method:str) -> str:
+        """Calculates hash of the raw backup.
 
         Returns:
-            str: MD5 hash of the raw backup.
+            str: hash of the raw backup.
+        Raises:
+            FileNotFoundError: Backup is not completed.
+            ValueError: Method is not supported.
         """
+        methods = {
+            "md5": md5,
+            "sha1": sha1,
+            "sha256": sha256,
+            "sha512": sha512
+        }
+        
+        if method not in methods.keys():
+            self.logger.error(f"Method {method} is not supported.")
+            raise ValueError(f"Method {method} is not supported. Supported methods: md5, sha1, sha256, sha512.")
+        
         backup_path = join(self.dest_path, self.name)
         
-        md5_hash = md5()
+        if not exists(backup_path):
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        
+        if not self.completed:
+            self.logger.warning(f"Backup {self.name} is not completed. Calculating hash of the incomplete backup.")           
+        
+        hash = methods[method]()
         
         for root, _, files in walk(backup_path):
             for file in files:
                 with open(join(root, file), "rb") as handle:
-                    md5_hash.update(handle.read())
+                    hash.update(handle.read())
         
-        md5_hash = md5_hash.hexdigest()
+        hash = hash.hexdigest()
         
-        self.logger.debug(f"MD5 hash of the raw backup {self.name} is {md5_hash}.")
-        return md5_hash
+        self.logger.debug(f"{method} hash of the raw backup {self.name} is {hash}.")
+        return hash
+    
+    def calculate_compressed_hash(self, method) -> str:
+        """Calculates hash of the compressed backup.
 
-                
-shutil.rmtree("../test-target/test", ignore_errors=True)
-shutil.rmtree("../test-target/test.zip", ignore_errors=True)
+        Returns:
+            str: hash of the compressed backup.
+        Raises:
+            FileNotFoundError: Backup is not completed.
+            ValueError: Method is not supported.
+        """
+        
+        methods = {
+            "md5": md5,
+            "sha1": sha1,
+            "sha256": sha256,
+            "sha512": sha512
+        }
+        
+        if method not in methods.keys():
+            self.logger.error(f"Method {method} is not supported.")
+            raise ValueError(f"Method {method} is not supported. Supported methods: md5, sha1, sha256, sha512.")
+        
+        backup_path = join(self.dest_path, self.name)
+        
+        if not exists(f"{backup_path}.zip"):
+            self.logger.error(f"Backup {self.name} is not completed.")
+            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        
+        if not self.completed:
+            self.logger.warning(f"Backup {self.name} is not completed. Calculating hash of the incomplete backup.")  
+        
+        hash = methods[method]()
+        
+        with open(f"{backup_path}.zip", "rb") as handle:
+            hash.update(handle.read())
+        
+        hash = hash.hexdigest()
+        
+        self.logger.debug(f"{method} hash of the compressed backup {self.name} is {hash}.")
+        return hash
+    
+    def restore_backup(self, restore_path:str) -> bool:
+        """Restores backup.
 
-backup = Backup(name="test", dest_path="../test-target")
-backup.create_raw_backup(src_path="../test-source")
-backup.calculate_raw_md5()
-backup.compress_raw_backup()
-backup.delete_raw_backup()
-backup.unpack_compressed()
-backup.calculate_raw_md5()
+        Args:
+            restore_path: Path to restore the backup.
+
+        Raises:
+            FileNotFoundError: Restore path does not exist.
+            FileNotFoundError: Backup is not available.
+            ValueError: Restore path is not valid.
+
+        Returns:
+            bool: True if backup was restored successfully, False if errors occurred.
+        """
+        if restore_path is None or restore_path == "":
+            self.logger.error(f"Restore path {restore_path} is not valid.")
+            raise ValueError(f"Restore path {restore_path} is not valid.")
+        
+        if not exists(restore_path):
+            self.logger.error(f"Restore path {restore_path} does not exist.")
+            raise FileNotFoundError(f"Restore path {restore_path} does not exist.")
+        
+        if self.completed:
+            self.logger.info(f"Restoring backup {self.name} from raw to {restore_path}.")
+            self.restore_backup_from_raw(restore_path)
+            
+        elif self.compressed:
+            self.logger.info(f"Restoring backup {self.name} from compressed to {restore_path}.")
+            self.unpack_compressed()
+            self.restore_backup_from_raw(restore_path)
+            
+        else:
+            self.logger.error(f"Backup {self.name} is not available.")
+            raise FileNotFoundError(f"Backup {self.name} is not available.")
+            
+            
+        backup_hash = self.calculate_raw_hash(method="sha256")
+        restore_hash = sha256()
+        
+        for root, _, files in walk(restore_path):
+            for file in files:
+                with open(join(root, file), "rb") as handle:
+                    restore_hash.update(handle.read())
+                    
+        restore_hash = restore_hash.hexdigest()
+        
+        if backup_hash == restore_hash:
+            self.logger.info(f"Backup {self.name} restored to {restore_path} successfully.")
+            return True
+        else:
+            self.logger.warning(f"Backup {self.name} restored to {restore_path}, but hashes are different. Backup hash: {backup_hash}, restore hash: {restore_hash}.")
+            return False
+
