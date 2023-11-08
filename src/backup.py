@@ -231,6 +231,7 @@ class Backup():
         Raises:
             PermissionError: Change of `compressed` property is not allowed for Backup.
         """
+        # TODO: check if zip file exists
         caller_class = inspect.currentframe().f_back.f_locals.get("self").__class__.__name__
         
         if caller_class == self.__class__.__name__:
