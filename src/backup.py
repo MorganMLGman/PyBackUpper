@@ -2,7 +2,7 @@ import logging
 import logging.config
 import inspect
 import shutil
-from os import walk
+from os import walk, remove
 from os.path import exists, join, normpath, getsize
 from tools import size_to_human_readable
 from zipfile import ZipFile, ZIP_BZIP2
@@ -22,12 +22,19 @@ class Backup():
             logger (logging.Logger, optional): Logger for the class. Defaults to None.
         """
         self.logger = logger
-        self.completed = False
         self.name = name
         self.dest_path = dest_path
         self.ignored = ignored
-        self.compressed = False
-        self.logger.info(f"Backup {self.name} initialized.")
+        
+        try:
+            size = self.get_raw_size()
+            self.completed =  True if size > 0 else False
+        except FileNotFoundError:
+            self.completed = False
+        
+        self.compressed = True if exists(f"{join(self.dest_path, self.name)}.zip") else False
+        
+        self.logger.info(f"Backup {self.name} initialized.\n{self}")
         
     def __str__(self) -> str:
         """Returns string representation of the backup.
@@ -36,13 +43,13 @@ class Backup():
             str: String representation of the backup.
         """
         
-        size = size_to_human_readable(self.get_raw_size())
+        size = size_to_human_readable(self.get_size())
         
         return  f"Backup {self.name}:\n" \
                 f"  Destination path: {self.dest_path}\n" \
-                f"  Completed: {self.completed}\n" \
                 f"  Ignored: {self.ignored}\n" \
                 f"  Size: {size}\n" \
+                f"  Completed: {self.completed}\n" \
                 f"  Compressed: {self.compressed}\n"
         
     
@@ -231,7 +238,6 @@ class Backup():
         Raises:
             PermissionError: Change of `compressed` property is not allowed for Backup.
         """
-        # TODO: check if zip file exists
         caller_class = inspect.currentframe().f_back.f_locals.get("self").__class__.__name__
         
         if caller_class == self.__class__.__name__:
@@ -259,7 +265,7 @@ class Backup():
             raise FileNotFoundError(f"Backup {backup_path} does not exist.")
         
         size = sum(getsize(join(root, file)) for root, dirs, files in walk(backup_path) for file in files)
-        self.logger.debug(f"Raw size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
+        self.logger.debug(f"Raw size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
     
     def get_compressed_size(self) -> int:
@@ -279,7 +285,7 @@ class Backup():
             raise FileNotFoundError(f"Backup {backup_path}.zip does not exist.")
         
         size = getsize(f"{backup_path}.zip")
-        self.logger.debug(f"Compressed size of the backup {self.name} is {size}. Human readable: {size_to_human_readable(size)}.")
+        self.logger.debug(f"Compressed size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
     
     def get_size(self) -> int:
@@ -362,13 +368,13 @@ class Backup():
             FileNotFoundError: Backup is not completed.
             FileNotFoundError: Zip file was not created.
         """
-             
+
         if not self.completed:
             self.logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
         
         if self.compressed:
-            self.logger.info(f"Backup {self.name} is already compressed. Nothing to do 😍.")
+            self.logger.info(f"Backup {self.name} is already compressed. Nothing to do :).")
             return
 
         self.logger.debug(f"Compressing raw backup {self.name}.")
@@ -385,7 +391,7 @@ class Backup():
         n_workers = cpu_count() * 2
         
         self.logger.debug(f"Using {n_workers} workers to compress the backup.")
-              
+
         chunk_size = len(file_paths) // n_workers
         if chunk_size == 0:
             chunk_size = 1
@@ -452,10 +458,12 @@ class Backup():
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
         
         self.logger.debug(f"Deleting backup {self.name}.")
-        backup_path = join(self.dest_path, self.name)
+        backup_path = normpath(join(self.dest_path, self.name))
         
-        shutil.rmtree(backup_path)
-        shutil.rmtree(f"{backup_path}.zip")
+        shutil.rmtree(backup_path, ignore_errors=True)
+        
+        if self.compressed:
+            remove(f"{backup_path}.zip")
         
         self.completed = False
         self.compressed = False
@@ -647,3 +655,19 @@ class Backup():
             self.logger.warning(f"Backup {self.name} restored to {restore_path}, but hashes are different. Backup hash: {backup_hash}, restore hash: {restore_hash}.")
             return False
 
+    def calculate_compression_ratio(self) -> float:
+        """Calculates compression ratio of the backup.
+
+        Returns:
+            float: Compression ratio of the backup.
+        """
+        try:
+            raw_size = self.get_raw_size()
+            compressed_size = self.get_compressed_size()
+        
+            ratio = raw_size / compressed_size
+        except FileNotFoundError:
+            ratio = 0.0
+        
+        self.logger.debug(f"Compression ratio of the backup {self.name} is {ratio}.")
+        return ratio
