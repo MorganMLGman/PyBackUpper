@@ -13,13 +13,13 @@ from multiprocessing import cpu_count
 from hashlib import md5, sha256, sha512, sha1
 from tools import size_to_human_readable
 
-class Backup():
+class Backup(dict):
     """Backup class for pybackupper."""
     def __init__(self,
-                 name:str,
-                 dest_path:str,
-                 ignored:str = None,
-                 logger:logging.Logger=None) -> None:
+                name:str,
+                dest_path:str,
+                ignored:str = None,
+                logger:logging.Logger=None) -> None:
         """Initializes Backup object.
 
         Args:
@@ -32,6 +32,7 @@ class Backup():
         self.name = name
         self.dest_path = dest_path
         self.ignored = ignored
+        super().__init__(self.__dict__())
 
         try:
             size = self.get_raw_size()
@@ -40,8 +41,8 @@ class Backup():
             self.completed = False
 
         self.compressed = True if exists(f"{join(self.dest_path, self.name)}.zip") else False
-
-        self.logger.info(f"Backup {self.name} initialized.\n{self}")
+        super().update(self.__dict__())
+        self.logger.debug(f"Backup {self.name} initialized.\n{self}")
 
     def __str__(self) -> str:
         """Returns string representation of the backup.
@@ -49,7 +50,6 @@ class Backup():
         Returns:
             str: String representation of the backup.
         """
-
         size = size_to_human_readable(self.get_size())
 
         return  f"Backup {self.name}:\n" \
@@ -58,6 +58,20 @@ class Backup():
                 f"  Size: {size}\n" \
                 f"  Completed: {self.completed}\n" \
                 f"  Compressed: {self.compressed}\n"
+
+    def __dict__(self) -> dict:
+        """Returns dictionary representation of the backup.
+
+        Returns:
+            dict: Dictionary representation of the backup.
+        """
+        return {
+            "name": self.name,
+            "size": size_to_human_readable(self.get_size()),
+            "ignored": self.ignored,
+            "completed": self.completed,
+            "compressed": self.compressed,
+        }
 
     @property
     def logger(self) -> logging.Logger:
@@ -168,7 +182,10 @@ class Backup():
         Returns:
             bool: True if backup is completed, False otherwise.
         """
-        return self._completed
+        try:
+            return self._completed
+        except AttributeError:
+            return False
 
     @completed.setter
     def completed(self, completed:bool) -> None:
@@ -185,6 +202,7 @@ class Backup():
         if caller_class == self.__class__.__name__:
             self.logger.debug(f"Setting completed property of the backup to {completed}.")
             self._completed = completed
+            super().__init__(self.__dict__())
         else:
             self.logger.error(f"Change of `completed` property is not allowed for {caller_class}.")
             raise PermissionError(
@@ -197,7 +215,10 @@ class Backup():
         Returns:
             str: Ignored patterns of the backup.
         """
-        return self._ignored
+        try:
+            return self._ignored
+        except AttributeError:
+            return "*.sock, *.pid, *.lock"
 
     @ignored.setter
     def ignored(self, ignored:str) -> None:
@@ -225,6 +246,7 @@ class Backup():
                 raise PermissionError("Cannot change ignored files of the backup.")
         except AttributeError:
             self.logger.debug(f"Setting ignored files of the backup to {ignored}.")
+            super().__init__(self.__dict__())
             self._ignored = ignored
 
     @property
@@ -234,7 +256,10 @@ class Backup():
         Returns:
             bool: True if backup is compressed, False otherwise.
         """
-        return self._compressed
+        try:
+            return self._compressed
+        except AttributeError:
+            return False
 
     @compressed.setter
     def compressed(self, compressed:bool) -> None:
@@ -251,6 +276,7 @@ class Backup():
         if caller_class == self.__class__.__name__:
             self.logger.debug(f"Setting compressed property of the backup to {compressed}.")
             self._compressed = compressed
+            super().__init__(self.__dict__())
         else:
             self.logger.error(f"Change of `compressed` property is not allowed for {caller_class}.")
             raise PermissionError(
@@ -274,7 +300,7 @@ class Backup():
             raise FileNotFoundError(f"Backup {backup_path} does not exist.")
 
         size = sum(getsize(join(root, file))
-                   for root, dirs, files in walk(backup_path) for file in files)
+                for root, dirs, files in walk(backup_path) for file in files)
         self.logger.debug(f"Raw size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
 
@@ -373,7 +399,7 @@ class Backup():
         with lock:
             for file_path in file_paths_batch:
                 handle.write(file_path,
-                             normpath(file_path).replace(backup_path, "").lstrip("\\").lstrip("/"))
+                            normpath(file_path).replace(backup_path, "").lstrip("\\").lstrip("/"))
 
     def compress_raw_backup(self) -> None:
         """Compresses raw backup to the zip file.
