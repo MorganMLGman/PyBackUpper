@@ -4,11 +4,13 @@ import logging
 import logging.config
 from singleton import Singleton
 from os.path import exists, normpath, getsize, join
-from os import makedirs, walk
+from os import makedirs, walk, listdir
 from datetime import datetime
 from psutil import disk_usage
 from json import dump, load
+from pprint import pformat
 from shutil import Error as shutilError
+from concurrent.futures import ThreadPoolExecutor
 from backup import Backup
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
@@ -21,6 +23,7 @@ class BackupManager(metaclass=Singleton):
                 dest_path:str,
                 raw_to_keep:int,
                 compressed_to_keep:int,
+                s3_to_keep:int,
                 ignored:str=None,
                 s3_handler=None,
                 telegram_handler=None,
@@ -31,6 +34,7 @@ class BackupManager(metaclass=Singleton):
         self.ignored = ignored
         self.raw_to_keep = raw_to_keep
         self.compressed_to_keep = compressed_to_keep
+        self.s3_to_keep = s3_to_keep
         self.s3_handler = s3_handler
         self.telegram_handler = telegram_handler
         self.backups = {
@@ -261,6 +265,36 @@ class BackupManager(metaclass=Singleton):
         self._compressed_to_keep = compressed_to_keep
 
     @property
+    def s3_to_keep(self) -> int:
+        """Get the number of S3 backups to keep.
+
+        Returns:
+            int: Number of S3 backups to keep.
+        """
+        return self._s3_to_keep
+
+    @s3_to_keep.setter
+    def s3_to_keep(self, s3_to_keep:int) -> None:
+        """
+
+        Args:
+            s3_to_keep (int): Number of S3 backups to keep.
+
+        Raises:
+            TypeError: s3_to_keep must be an integer.
+            ValueError: s3_to_keep must be greater or equal to 0.
+        """
+        if not type(s3_to_keep) is int:
+            self.logger.error("s3_to_keep must be an integer.")
+            raise TypeError("s3_to_keep must be an integer.")
+
+        if s3_to_keep < 0:
+            self.logger.error("s3_to_keep must be greater or equal to 0.")
+            raise ValueError("s3_to_keep must be greater or equal to 0.")
+
+        self._s3_to_keep = s3_to_keep
+
+    @property
     def s3_handler(self):
         """Get the S3 handler.
 
@@ -436,11 +470,12 @@ class BackupManager(metaclass=Singleton):
             dump(self.__dict__(), file, indent=4)
         self.logger.debug(f"Backup info saved to {dest_path}.")
 
-    def load_backup_info(self, src_path:str=None) -> None:
+    def load_backup_info(self, src_path:str=None, ignore_hash_mismatch:bool=True) -> None:
         """Load the backup info from a file.
 
         Args:
             src_path (str): Path to load the backup info.
+            ignore_hash_mismatch (bool): Ignore hash mismatch and load backup anyway.
 
         Raises:
             FileNotFoundError: File does not exist.
@@ -459,14 +494,60 @@ class BackupManager(metaclass=Singleton):
         with open(path, "r") as file:
             backup_info = load(file)
 
-        # self.src_path = backup_info["src_path"]
-        # self.dest_path = backup_info["dest_path"]
-        # self.ignored = backup_info["ignored"]
-        # self.raw_to_keep = backup_info["raw_to_keep"]
-        # self.compressed_to_keep = backup_info["compressed_to_keep"]
-
         for backup in backup_info["backups"]["local"]:
-            self.backups["local"].append(Backup(backup["name"], self.dest_path, backup["ignored"], self.logger))
+            tmp_backup = Backup(backup["name"], self.dest_path, self.ignored, self.logger)
+            if (backup["raw_hash"] != tmp_backup.calculate_raw_hash(method="sha256")) or \
+                (backup["compressed_hash"] != tmp_backup.calculate_compressed_hash(method="sha256")):
+                if ignore_hash_mismatch:
+                    self.logger.warning(f"Hash mismatch for backup {backup['name']}. Loading backup anyway.")
+                else:
+                    self.logger.error(f"Hash mismatch for backup {backup['name']}. Skipping backup.")
+                    continue
+
+            self.backups["local"].append(tmp_backup)
+
+        self.logger.debug(f"Backup info loaded from {src_path}.")     
+
+    def restore_backup_info(self, src_path:str=None) -> None:
+        """Restore the backup info file.
+
+        Args:
+            src_path (str): Path to restore the backup info.
+        """
+        if src_path is None or src_path == "":
+            src_path = self.dest_path
+
+        self.logger.debug(f"Restoring backup info from {src_path}...")
+        src_path = normpath(src_path)
+
+        backups_list = set()
+        for item in listdir(src_path):
+            if item.endswith(".zip"):
+                backups_list.add(item.split(".")[0])
+            else:
+                backups_list.add(item)
+        
+        with ThreadPoolExecutor(len(backups_list)) as executor:
+            for backup in backups_list:
+                executor.submit(lambda: 
+                    self.backups["local"].append(
+                        Backup( backup, 
+                                self.dest_path, 
+                                self.ignored, 
+                                self.logger)))
+
+        self.backups["local"].sort(key=lambda x: x.name, reverse=False)
+
+        if len(self.backups["local"]) > 0:
+            self.logger.debug(f"Restored backups {pformat(backups_list)} from {src_path}")
+            self.save_backup_info()
+            if self.telegram_handler is not None:
+                self.telegram_handler.send_message(f"Restored backups {pformat(backups_list)} from {src_path}")
+            return
+
+        self.logger.warning(f"No backups found in {src_path}.")       
+        if self.telegram_handler is not None:
+            self.telegram_handler.send_message(f"No backups found in {src_path}.")
 
     def create_backup(self) -> bool:
         name = self.generate_backup_name()
@@ -523,7 +604,11 @@ backup_manager = BackupManager( src_path="../test-source",
 
 
 
-backup_manager.load_backup_info()
+try:
+    backup_manager.load_backup_info()
+except FileNotFoundError:
+    print("No backup info found. Restoring it.")
+    backup_manager.restore_backup_info()
 backup_manager.create_backup()
 backup_manager.save_backup_info()
 print(backup_manager)

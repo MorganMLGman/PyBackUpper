@@ -71,6 +71,8 @@ class Backup(dict):
             "ignored": self.ignored,
             "completed": self.completed,
             "compressed": self.compressed,
+            "raw_hash": self.calculate_raw_hash(method="sha256") if self.completed else None,
+            "compressed_hash": self.calculate_compressed_hash(method="sha256") if self.compressed else None,
         }
 
     @property
