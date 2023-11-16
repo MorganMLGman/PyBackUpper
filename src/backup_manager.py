@@ -2,6 +2,7 @@
 
 import logging
 import logging.config
+from logging.handlers import TimedRotatingFileHandler
 from singleton import Singleton
 from os.path import exists, normpath, getsize, join
 from os import makedirs, walk, listdir
@@ -11,10 +12,11 @@ from json import dump, load
 from pprint import pformat
 from shutil import Error as shutilError
 from concurrent.futures import ThreadPoolExecutor
+from re import fullmatch
 from backup import Backup
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
-from tools import size_to_human_readable, timestamp_to_file_name
+from tools import *
 
 class BackupManager(metaclass=Singleton):
     """BackupManager class"""
@@ -43,6 +45,11 @@ class BackupManager(metaclass=Singleton):
             "local": [],
             "s3": [],
         }
+
+        try:
+            self.load_backup_info()
+        except FileNotFoundError:
+            self.restore_backup_info()
         self.logger.info("BackupManager initialized.")
 
     def __str__(self) -> str:
@@ -65,8 +72,8 @@ class BackupManager(metaclass=Singleton):
                 f"  ignored: {self.ignored}\n" \
                 f"  raw_to_keep: {self.raw_to_keep}\n" \
                 f"  compressed_to_keep: {self.compressed_to_keep}\n" \
-                f"  s3_handler: {True if not self.s3_handler is None else False}\n" \
-                f"  telegram_handler: {True if not self.telegram_handler is None else False}\n" \
+                f"  s3_handler: {True if self.s3_handler else False}\n" \
+                f"  telegram_handler: {True if self.telegram_handler else False}\n" \
                 f"  backups:\n" \
                 f"    local:\n" \
                 f"      count: {len(self.backups['local'])}\n" \
@@ -405,7 +412,7 @@ class BackupManager(metaclass=Singleton):
 
             if space < total * 0.1:
                 self.logger.warning(f"Available space of {self.dest_path} is less than 10% of total space.")
-                if self.telegram_handler is not None:
+                if self.telegram_handler:
                     self.telegram_handler.send_message(
                         f"Available space of {self.dest_path} is less than 10% of total space.\n"
                         f"Space: {size_to_human_readable(space)} / {size_to_human_readable(total)}")
@@ -434,6 +441,8 @@ class BackupManager(metaclass=Singleton):
         if len(self.backups["local"]) > 0:
             try:
                 compression_ratio = self.backups["local"][-1].calculate_compression_ratio()
+                if compression_ratio == 0:
+                    compression_ratio = 1
             except FileNotFoundError:
                 compression_ratio = 1
 
@@ -485,9 +494,9 @@ class BackupManager(metaclass=Singleton):
         if src_path is None or src_path == "":
             src_path = self.dest_path
 
-        self.logger.debug(f"Loading backup info from {src_path}...")
         src_path = normpath(src_path)
         path = normpath(join(src_path, "backup_info.json"))
+        self.logger.debug(f"Loading backup info from {path}...")
 
         if not exists(path):
             self.logger.error(f"File {path} does not exist.")
@@ -497,7 +506,11 @@ class BackupManager(metaclass=Singleton):
             backup_info = load(file)
 
         for backup in backup_info["backups"]["local"]:
-            tmp_backup = Backup(backup["name"], self.dest_path, self.ignored, self.logger)
+            try:
+                tmp_backup = Backup(backup["name"], self.dest_path, self.ignored, self.logger)
+            except FileNotFoundError:
+                self.logger.error(f"Backup {backup['name']} not found.")
+                continue
             if (backup["raw_hash"] != tmp_backup.calculate_raw_hash(method="sha256")) or \
                 (backup["compressed_hash"] != tmp_backup.calculate_compressed_hash(method="sha256")):
                 if ignore_hash_mismatch:
@@ -516,6 +529,8 @@ class BackupManager(metaclass=Singleton):
         Args:
             src_path (str): Path to restore the backup info.
         """
+        pattern = r"\b\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}(?:\.zip)?\b"
+        
         if src_path is None or src_path == "":
             src_path = self.dest_path
 
@@ -524,34 +539,40 @@ class BackupManager(metaclass=Singleton):
 
         backups_list = set()
         for item in listdir(src_path):
-            if item.endswith(".zip"):
-                backups_list.add(item.split(".")[0])
-            else:
-                backups_list.add(item)
-        
-        with ThreadPoolExecutor(len(backups_list)) as executor:
-            for backup in backups_list:
-                executor.submit(lambda: 
-                    self.backups["local"].append(
-                        Backup( backup, 
-                                self.dest_path, 
-                                self.ignored, 
-                                self.logger)))
+            if fullmatch(pattern, item):
+                if item.endswith(".zip"):
+                    backups_list.add(item.split(".")[0])
+                else:
+                    backups_list.add(item)
+
+        if len(backups_list) > 0:
+            with ThreadPoolExecutor(len(backups_list)) as executor:
+                for backup in backups_list:
+                    executor.submit(lambda: 
+                        self.backups["local"].append(
+                            Backup( backup, 
+                                    self.dest_path, 
+                                    self.ignored, 
+                                    self.logger)))
 
         self.backups["local"].sort(key=lambda x: x.name, reverse=False)
-
         if len(self.backups["local"]) > 0:
-            self.logger.debug(f"Restored backups {pformat(backups_list)} from {src_path}")
+            self.logger.debug(f"Restored backups\n{pformat(backups_list, sort_dicts=False, compact=True, indent=2)}\nfrom {src_path}")
             self.save_backup_info()
-            if self.telegram_handler is not None:
-                self.telegram_handler.send_message(f"Restored backups {pformat(backups_list)} from {src_path}")
+            if self.telegram_handler:
+                self.telegram_handler.send_message(f"Restored backups\n{pformat(backups_list, sort_dicts=False, compact=True, indent=2)}\nfrom {src_path}")
             return
 
         self.logger.warning(f"No backups found in {src_path}.")       
-        if self.telegram_handler is not None:
+        if self.telegram_handler:
             self.telegram_handler.send_message(f"No backups found in {src_path}.")
 
     def create_backup(self) -> bool:
+        """Create a backup.
+
+        Returns:
+            bool: True if the backup has been created, False otherwise.
+        """
         name = self.generate_backup_name()
         self.logger.info(f"Creating backup {name}...")
 
@@ -592,6 +613,8 @@ class BackupManager(metaclass=Singleton):
             self.logger.debug(f"Compression ratio of {backup.name} is {backup.calculate_compression_ratio():.2f}.")
 
         self.backups["local"].append(backup)
+        self.save_backup_info()
+
         self.logger.info(f"Backup {backup.name} created.")
         self.logger.debug(f"Backup {backup.name} size is {size_to_human_readable(backup.get_size())}.")
         return True
@@ -702,35 +725,87 @@ class BackupManager(metaclass=Singleton):
     def delete_old_backups(self) -> None:
         """Delete old backups."""
         self.logger.debug(f"Deleting old backups...")
+        backups_to_delete = {
+            "raw": [],
+            "compressed": [],
+            "s3": [],
+        }
         if len(self.backups["local"]) > self.raw_to_keep:
             for backup in self.backups["local"][0:len(self.backups["local"]) - self.raw_to_keep]:
-                self.delete_raw_backup(backup.name)
+                if backup.completed:
+                    backups_to_delete["raw"].append(backup.name)
 
         if len(self.backups["local"]) > self.compressed_to_keep:
             for backup in self.backups["local"][0:len(self.backups["local"]) - self.compressed_to_keep]:
-                self.delete_compressed_backup(backup.name)
+                if backup.compressed:
+                    backups_to_delete["compressed"].append(backup.name)
 
         if len(self.backups["s3"]) > self.s3_to_keep:
             for backup in self.backups["s3"][0:len(self.backups["s3"]) - self.s3_to_keep]:
-                self.delete_s3_backup(backup.name)
+                backups_to_delete["s3"].append(backup.name)
+
+        self.logger.info(f"Deleting backups\n{pformat(backups_to_delete, sort_dicts=False, compact=True, indent=2)}\n...")
+
+        for backup in backups_to_delete["raw"]:
+            self.delete_raw_backup(backup)
+        for backup in backups_to_delete["compressed"]:
+            self.delete_compressed_backup(backup)
+        for backup in backups_to_delete["s3"]:
+            self.delete_s3_backup(backup)
 
         self.logger.debug(f"Old backups deleted.")
 
+    def run_backup(self) -> None:
+        """Run the backup."""
+        start_time = datetime.now().timestamp()
+        self.logger.info(f"Running backup. Start time: {timestamp_to_human_readable(start_time)}.")
+
+        if self.create_backup():
+            # TODO: Add S3 backup
+            self.delete_old_backups()
+            end_time = datetime.now().timestamp()
+            self.logger.info(f"Backup completed. End time: {timestamp_to_human_readable(end_time)}.")
+            self.logger.info(f"Backup duration: {time_diff_to_human_readable(round(end_time - start_time))}.")
+            self.logger.info(f"""Backup info:\n{pformat(self.backups["local"][-1].__dict__(), sort_dicts=False, indent=2, compact=True)}.""")
+
+            if self.telegram_handler:
+                self.telegram_handler.send_message(
+                    f"*Backup completed*\\.\n" \
+                    f"""Start time: *{timestamp_to_human_readable(start_time).replace("-", "\\-")}*\\.\n""" \
+                    f"End time: *{timestamp_to_human_readable(end_time).replace("-", "\\-")}*\\.\n" \
+                    f"Backup duration: *{time_diff_to_human_readable(round(end_time - start_time))}*\\.\n" \
+                    f"Backup info:\n```json\n{pformat(self.backups['local'][-1].__dict__(), sort_dicts=False, indent=2, compact=True)}```\n",
+                    markdown=True)
+        else:
+            self.logger.error(f"Backup failed.")
+
+            if self.telegram_handler:
+                for index, handler in enumerate(self.logger.handlers):
+                    if type(handler) is TimedRotatingFileHandler:
+                        break
+
+                path = normpath(self.logger.handlers[index].baseFilename)
+                self.telegram_handler.send_file(path, caption=f"Backup failed at {timestamp_to_human_readable(datetime.now().timestamp())}.")
+
+        try:
+            self.save_backup_info()
+        except OSError:
+            self.logger.error(f"Backup info cannot be saved.")
+            self.logger.error(f"Printing backup info:\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}")
+
+            if self.telegram_handler:
+                self.telegram_handler.send_message(
+                    f"*Backup info cannot be saved\\.*\n" \
+                    f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
+                    markdown=True)
+
+telegram = ***REMOVED***
 backup_manager = BackupManager( src_path="../test-source",
                                 dest_path="../test-target",
-                                raw_to_keep=2,
-                                compressed_to_keep=4,
+                                raw_to_keep=1,
+                                compressed_to_keep=1,
                                 ignored=None,
                                 s3_handler=None,
-                                telegram_handler=None)
+                                telegram_handler=telegram)
 
-
-
-try:
-    backup_manager.load_backup_info()
-except FileNotFoundError:
-    print("No backup info found. Restoring it.")
-    backup_manager.restore_backup_info()
-backup_manager.create_backup()
-backup_manager.save_backup_info()
-print(backup_manager)
+backup_manager.run_backup()

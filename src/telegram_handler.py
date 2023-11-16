@@ -18,7 +18,10 @@ class TelegramHandler(metaclass=Singleton):
         self.logger = logger
         self.token = token
         self.chat_id = chat_id
-        self.logger.info("TelegramHandler initialized.")
+        if not self.test_connection():
+            self.logger.error("TelegramHandler initialization failed.")
+            raise ConnectionError("TelegramHandler initialization failed.")
+        self.logger.debug("TelegramHandler initialized.")
 
     @property
     def token(self) -> str:
@@ -111,7 +114,7 @@ class TelegramHandler(metaclass=Singleton):
                     f"Response: {response.json()}.")
                 return False
 
-            self.logger.info("Telegram connection test successful.")
+            self.logger.debug("Telegram connection test successful.")
             return True
         except Exception as e:
             self.logger.error(f"Telegram connection test failed. Exception: {e}.")
@@ -158,7 +161,7 @@ class TelegramHandler(metaclass=Singleton):
 
         try:
             response = requests.post(url, data=data, timeout=10)
-            if not response.status_code != 200 or response.json()['ok']:
+            if response.status_code != 200 or not response.json()['ok']:
                 self.logger.error(
                     f"Failed to send message to Telegram chat. "\
                     f"Status code: {response.status_code}. Response: {response.json()}.")

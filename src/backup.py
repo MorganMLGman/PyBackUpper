@@ -170,7 +170,7 @@ class Backup(dict):
 
         try:
             if exists(backup_path) and self.get_raw_size() > 0:
-                self.logger.warning(f"Backup {backup_path} already exists. "\
+                self.logger.debug(f"Backup {backup_path} already exists. "\
                     "Marking it as completed.")
                 self.completed = True
         except FileNotFoundError:
@@ -290,19 +290,16 @@ class Backup(dict):
 
         Returns:
             int: Raw size of the backup.
-
-        Raises:
-            FileNotFoundError: Backup does not exist.
         """
-        backup_path = join(self.dest_path, self.name)
+        backup_path = normpath(join(self.dest_path, self.name))
         self.logger.debug(f"Getting raw size of the backup {self.name}.")
 
         if not exists(backup_path):
-            self.logger.error(f"Backup {backup_path} does not exist.")
-            raise FileNotFoundError(f"Backup {backup_path} does not exist.")
+            self.logger.debug(f"Backup {backup_path} does not exist.")
+            return 0
 
         size = sum(getsize(join(root, file))
-                for root, dirs, files in walk(backup_path) for file in files)
+                for root, _, files in walk(backup_path) for file in files)
         self.logger.debug(f"Raw size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
 
@@ -630,10 +627,6 @@ class Backup(dict):
         if not exists(f"{backup_path}.zip"):
             self.logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
-
-        if not self.completed:
-            self.logger.warning(f"Backup {self.name} is not completed. "\
-                "Calculating hash of the incomplete backup.")  
 
         zip_hash = methods[method]()
 

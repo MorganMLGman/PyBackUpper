@@ -45,6 +45,24 @@ def timestamp_to_file_name(timestamp: int) -> str:
     """
     return datetime.fromtimestamp(timestamp).strftime("%Y_%m_%d_%H_%M_%S")
 
+def time_diff_to_human_readable(time_diff: int) -> str:
+    """Converts the time difference to a human readable format.
+
+    Args:
+        time_diff (int): Time difference.
+
+    Returns:
+        str: Human readable time difference.
+    """
+    if time_diff < 60:
+        return f"{time_diff}s"
+    elif time_diff < 3600:
+        return f"{time_diff // 60}m {time_diff % 60}s"
+    elif time_diff < 86400:
+        return f"{time_diff // 3600}h {(time_diff % 3600) // 60}m {time_diff % 60}s"
+    else:
+        return f"{time_diff // 86400}d {(time_diff % 86400) // 3600}h {(time_diff % 3600) // 60}m {time_diff % 60}s"
+
 
 def timeit(func):
     """Decorator to measure the execution time of a function.
