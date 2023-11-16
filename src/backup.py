@@ -475,16 +475,16 @@ class Backup(dict):
         """Deletes compressed backup.
 
         Raises:
-            FileNotFoundError: Backup is not completed.
+            FileNotFoundError: Backup is not compressed.
         """
-        if not self.completed:
-            self.logger.error(f"Backup {self.name} is not completed.")
-            raise FileNotFoundError(f"Backup {self.name} is not completed.")
+        if not self.compressed:
+            self.logger.error(f"Backup {self.name} is not compressed.")
+            raise FileNotFoundError(f"Backup {self.name} is not compressed.")
 
         self.logger.debug(f"Deleting compressed backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
-        shutil.rmtree(f"{backup_path}.zip")
+        remove(f"{backup_path}.zip")
 
         self.compressed = False
         self.logger.debug(f"Backup {self.name} deleted.")
@@ -500,12 +500,9 @@ class Backup(dict):
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
 
         self.logger.debug(f"Deleting backup {self.name}.")
-        backup_path = normpath(join(self.dest_path, self.name))
 
-        shutil.rmtree(backup_path, ignore_errors=True)
-
-        if self.compressed:
-            remove(f"{backup_path}.zip")
+        self.delete_raw_backup()
+        self.delete_compressed_backup()
 
         self.completed = False
         self.compressed = False

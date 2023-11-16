@@ -23,7 +23,7 @@ class BackupManager(metaclass=Singleton):
                 dest_path:str,
                 raw_to_keep:int,
                 compressed_to_keep:int,
-                s3_to_keep:int,
+                s3_to_keep:int = 0,
                 ignored:str=None,
                 s3_handler=None,
                 telegram_handler=None,
@@ -35,8 +35,10 @@ class BackupManager(metaclass=Singleton):
         self.raw_to_keep = raw_to_keep
         self.compressed_to_keep = compressed_to_keep
         self.s3_to_keep = s3_to_keep
+
         self.s3_handler = s3_handler
         self.telegram_handler = telegram_handler
+
         self.backups = {
             "local": [],
             "s3": [],
@@ -594,10 +596,130 @@ class BackupManager(metaclass=Singleton):
         self.logger.debug(f"Backup {backup.name} size is {size_to_human_readable(backup.get_size())}.")
         return True
 
+    def get_backup_index_by_name(self, backup_name:str) -> int:
+        """Get the index of a backup by its name.
+
+        Args:
+            backup_name (str): Name of the backup.
+
+        Returns:
+            int: Index of the backup.
+        """
+        for index, backup in enumerate(self.backups["local"]):
+            if backup.name == backup_name:
+                return index
+        return -1
+
+    def delete_raw_backup(self, backup_name:str) -> bool:
+        """Delete a raw backup.
+
+        Args:
+            backup_name (str): Name of the backup to delete.
+
+        Returns:
+            bool: True if the backup has been deleted, False otherwise.
+        """
+        self.logger.debug(f"Deleting raw backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.backups["local"][index].delete_raw_backup()
+            if not self.backups["local"][index].completed and \
+                not self.backups["local"][index].compressed:
+                self.backups["local"].pop(index)
+        except FileNotFoundError:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        self.logger.debug(f"Raw backup {backup_name} deleted.")
+        return True
+
+    def delete_compressed_backup(self, backup_name:str) -> bool:
+        """Delete a compressed backup.
+
+        Args:
+            backup_name (str): Name of the backup to delete.
+
+        Returns:
+            bool: True if the backup has been deleted, False otherwise.
+        """
+        self.logger.debug(f"Deleting compressed backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.backups["local"][index].delete_compressed_backup()
+            if not self.backups["local"][index].completed and \
+                not self.backups["local"][index].compressed:
+                self.backups["local"].pop(index)
+        except FileNotFoundError:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        self.logger.debug(f"Compressed backup {backup_name} deleted.")
+        return True
+
+    def delete_s3_backup(self, backup_name:str) -> bool:
+        # TODO: Implement
+        pass
+
+    def delete_backup(self, backup_name:str) -> bool:
+        """Delete a backup.
+
+        Args:
+            backup_name (str): Name of the backup to delete.
+
+        Returns:
+            bool: True if the backup has been deleted, False otherwise.
+        """
+        self.logger.debug(f"Deleting backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.backups["local"][index].delete_backup()
+            # TODO: Add S3 backup deletion
+            if not self.backups["local"][index].completed and \
+                not self.backups["local"][index].compressed:
+                self.backups["local"].pop(index)
+        except FileNotFoundError:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        self.logger.debug(f"Backup {backup_name} deleted.")
+        return True
+
+    def delete_old_backups(self) -> None:
+        """Delete old backups."""
+        self.logger.debug(f"Deleting old backups...")
+        if len(self.backups["local"]) > self.raw_to_keep:
+            for backup in self.backups["local"][0:len(self.backups["local"]) - self.raw_to_keep]:
+                self.delete_raw_backup(backup.name)
+
+        if len(self.backups["local"]) > self.compressed_to_keep:
+            for backup in self.backups["local"][0:len(self.backups["local"]) - self.compressed_to_keep]:
+                self.delete_compressed_backup(backup.name)
+
+        if len(self.backups["s3"]) > self.s3_to_keep:
+            for backup in self.backups["s3"][0:len(self.backups["s3"]) - self.s3_to_keep]:
+                self.delete_s3_backup(backup.name)
+
+        self.logger.debug(f"Old backups deleted.")
+
 backup_manager = BackupManager( src_path="../test-source",
                                 dest_path="../test-target",
-                                raw_to_keep=5,
-                                compressed_to_keep=5,
+                                raw_to_keep=2,
+                                compressed_to_keep=4,
                                 ignored=None,
                                 s3_handler=None,
                                 telegram_handler=None)
