@@ -1,11 +1,40 @@
-import boto3
 import logging
 import logging.config
-import os
-import concurrent.futures
+import boto3
+from  botocore.exceptions import ClientError
+from os import walk, cpu_count
+from os.path import basename, exists, join, normpath
+from concurrent.futures import ThreadPoolExecutor
+from time import sleep
 
 class S3Handler:
-    def __init__(self, bucket_name, access_key, secret_key, acl='public-read', region='us-east-1', url='https://s3.amazonaws.com', logger: logging.Logger = None):
+    def __init__(self,
+                bucket_name:str,
+                access_key:str,
+                secret_key:str,
+                acl:str='public-read',
+                region:str='us-east-1',
+                url:str='https://s3.amazonaws.com',
+                logger:logging.Logger = None):
+        """Initialize the S3Handler class.
+
+        Args:
+            bucket_name (str): Bucket name.
+            access_key (str): Access key.
+            secret_key (str): Secret key.
+            acl (str, optional): ACL. Defaults to 'public-read'.
+            region (str, optional): Region. Defaults to 'us-east-1'.
+            url (_type_, optional): URL. Defaults to 'https://s3.amazonaws.com'.
+            logger (logging.Logger, optional):  Logger. Defaults to None.
+
+        Raises:
+            ConnectionError: If the connection to the bucket fails.
+        """
+
+        self.logger = logger
+        self.bucket_name = bucket_name
+        self.acl = acl
+
         self.client = boto3.client(
             's3',
             aws_access_key_id=access_key,
@@ -13,46 +42,182 @@ class S3Handler:
             region_name=region,
             endpoint_url=url
         )
-        self.bucket_name = bucket_name
-        self.acl = acl
-        
+
+        if not self.test_connection():
+            raise ConnectionError(f"Could not connect to bucket {self.bucket_name}")
+
+        self.logger.debug(f"Connected to bucket {self.bucket_name}")
+
+    @property
+    def bucket_name(self) -> str:
+        """Get the bucket name.
+
+        Returns:
+            str: The bucket name.
+        """
+        return self._bucket_name
+
+    @bucket_name.setter
+    def bucket_name(self, bucket_name:str) -> None:
+        """Set the bucket name.
+
+        Args:
+            bucket_name (str): The bucket name.
+
+        Raises:
+            ValueError: If the bucket name is None or empty.
+            TypeError: If the bucket name is not a string.
+        """
+        if bucket_name is None:
+            raise ValueError("bucket_name cannot be None")
+
+        if not isinstance(bucket_name, str):
+            raise TypeError("bucket_name must be a string")
+
+        if bucket_name == "":
+            raise ValueError("bucket_name cannot be empty")
+
+        self._bucket_name = bucket_name
+
+    @property
+    def acl(self) -> str:
+        """Get the acl.
+
+        Returns:
+            str: The acl.
+        """
+        return self._acl
+
+    @acl.setter
+    def acl(self, acl:str) -> None:
+        """Set the acl.
+
+        Args:
+            acl (str): The acl.
+
+        Raises:
+            ValueError: If the acl is None or empty.
+            TypeError: If the acl is not a string.
+        """
+        if acl is None:
+            raise ValueError("acl cannot be None")
+
+        if not isinstance(acl, str):
+            raise TypeError("acl must be a string")
+
+        if acl == "":
+            raise ValueError("acl cannot be empty")
+
+        self._acl = acl
+
+    @property
+    def logger(self) -> logging.Logger:
+        """Get the logger.
+
+        Returns:
+            logging.Logger: The logger.
+        """
+        return self._logger
+
+    @logger.setter
+    def logger(self, logger:logging.Logger) -> None:
+        """Set the logger.
+
+        Args:
+            logger (logging.Logger): The logger.
+
+        Raises:
+            ValueError: If the logger is None.
+            TypeError: If the logger is not a logging.Logger.
+        """
         if logger is None:
-            logging.config.fileConfig("log.conf")
-            self.logger = logging.getLogger('pybackupper_logger')
+            logging.config.fileConfig("log_dev.conf")
+            self._logger = logging.getLogger('pybackupper_logger')
         else:
-            self.logger = logger
-    
-    def upload_file(self, file_name, object_name=None):
-        if object_name is None:
-            object_name = os.path.basename(file_name)
-        
-        self.logger.debug(f"Uploading file {file_name} to {object_name}")
+            if not isinstance(logger, logging.Logger):
+                raise TypeError("logger must be a logging.Logger")
+            self._logger = logger
+
+    def test_connection(self) -> bool:
+        """Test the connection to the bucket.
+
+        Returns:
+            bool: True if the connection is successful, False otherwise.
+        """
         try:
-            _ = self.client.upload_file(file_name, self.bucket_name, object_name, ExtraArgs={'ACL': self.acl})
-            self.logger.debug(f"File {file_name} uploaded successfully")
-        except Exception as e:
+            _ = self.client.head_bucket(Bucket=self.bucket_name)
+        except ClientError as e:
             self.logger.error(e, exc_info=True)
             return False
         return True
-        
-    def upload_directory(self, directory_path, object_name=None):
+
+    def upload_file(self, file_path:str, object_name:str=None):
+        """Upload a file to the bucket.
+
+        Args:
+            file_path (str): The file path.
+            object_name (str, optional): The object name. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            error: botocore.exceptions.ClientError: If the upload fails.
+        """
+
+        if not exists(file_path):
+            raise FileNotFoundError(f"File {file_path} does not exist")
+
         if object_name is None:
-            object_name = os.path.basename(directory_path)
+            object_name = basename(file_path)
+        object_name = object_name.replace('\\', '/')
+
+        self.logger.debug(f"Uploading file {file_path} to {object_name}")
+        try:
+            _ = self.client.upload_file(file_path, self.bucket_name, object_name, ExtraArgs={'ACL': self.acl})
+            self.logger.debug(f"File {file_path} uploaded successfully")
+        except ClientError as error:
+            if error.response['Error']['Code'] == 'LimitExceededException':
+                self.logger.warn('API call limit exceeded; backing off and retrying in 5 seconds...')
+                sleep(5)
+                self.upload_file(file_path, object_name)
+            else:
+                self.logger.exception(error, exc_info=True)
+                raise error
+
+    def upload_directory(self, directory_path:str, object_name:str=None):
+        """Upload a directory to the bucket.
+
+        Args:
+            directory_path (str): The directory path.
+            object_name (str, optional): The object name. Defaults to None.
+
+        Raises:
+            FileNotFoundError: If the directory does not exist.
+            error: botocore.exceptions.ClientError: If the upload fails.
+        """
+        if not exists(directory_path):
+            raise FileNotFoundError(f"Directory {directory_path} does not exist")
+
+        if object_name is None:
+            object_name = basename(directory_path)
             
         self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
 
+        files_to_upload = []
+        for path, _, files in walk(directory_path):
+            dest_path = path.replace(directory_path, "")
+            for file in files:
+                files_to_upload.append((join(path, file), normpath(object_name + '/' + dest_path + '/' + file)))
+
+        n_workers = cpu_count() * 2
+        self.logger.debug(f"Uploading {len(files_to_upload)} files with {n_workers} workers")
+        
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2*os.cpu_count()) as executor:
-                for path, _, files in os.walk(directory_path):
-                    dest_path = path.replace(directory_path, "")
-                    for file in files:                        
-                        s3file = os.path.normpath(object_name + '/' + dest_path + '/' + file)
-                        local_file = os.path.join(path, file)
-                        self.logger.debug(f"upload : {local_file} to target: {s3file}")
-                        executor.submit(self.upload_file, local_file, s3file)
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            raise e
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                for file_path, object_name in files_to_upload:
+                    executor.submit(self.upload_file, file_path, object_name)
+        except ClientError as error:
+            self.logger.exception(error, exc_info=True)
+            raise error
     
     def delete_file(self, file_name):
         try:
@@ -209,3 +374,8 @@ class S3Handler:
             self.logger.error(e, exc_info=True)
             return False
         return True
+
+s3handler = S3Handler("***REMOVED***", "***REMOVED***", "***REMOVED***")
+
+s3handler.upload_file("../test-target/backup_info.json")
+s3handler.upload_directory("../test-target/2023_11_16_20_46_54")

@@ -799,7 +799,7 @@ class BackupManager(metaclass=Singleton):
                     f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
                     markdown=True)
 
-telegram = ***REMOVED***
+telegram = TelegramHandler("***REMOVED***", "***REMOVED***", "***REMOVED***")
 backup_manager = BackupManager( src_path="../test-source",
                                 dest_path="../test-target",
                                 raw_to_keep=1,

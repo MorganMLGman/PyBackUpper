@@ -4,12 +4,11 @@ import logging
 import logging.config
 import inspect
 import shutil
-from os import walk, remove
+from os import walk, remove, cpu_count
 from os.path import exists, join, normpath, getsize
 from zipfile import ZipFile, ZIP_BZIP2
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import cpu_count
 from hashlib import md5, sha256, sha512, sha1
 from tools import size_to_human_readable
 
