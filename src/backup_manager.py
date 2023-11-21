@@ -798,14 +798,3 @@ class BackupManager(metaclass=Singleton):
                     f"*Backup info cannot be saved\\.*\n" \
                     f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
                     markdown=True)
-
-telegram = TelegramHandler("***REMOVED***", "***REMOVED***", "***REMOVED***")
-backup_manager = BackupManager( src_path="../test-source",
-                                dest_path="../test-target",
-                                raw_to_keep=1,
-                                compressed_to_keep=1,
-                                ignored=None,
-                                s3_handler=None,
-                                telegram_handler=telegram)
-
-backup_manager.run_backup()

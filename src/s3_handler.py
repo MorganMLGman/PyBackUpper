@@ -1,11 +1,12 @@
 import logging
 import logging.config
 import boto3
-from  botocore.exceptions import ClientError
-from os import walk, cpu_count
-from os.path import basename, exists, join, normpath
+from botocore.exceptions import ClientError
+from os import walk, cpu_count, makedirs
+from os.path import basename, exists, join, normpath, dirname
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
+from tools import size_to_human_readable
 
 class S3Handler:
     def __init__(self,
@@ -35,13 +36,13 @@ class S3Handler:
         self.bucket_name = bucket_name
         self.acl = acl
 
-        self.client = boto3.client(
+        self.bucket = boto3.resource(
             's3',
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name=region,
             endpoint_url=url
-        )
+        ).Bucket(self.bucket_name)
 
         if not self.test_connection():
             raise ConnectionError(f"Could not connect to bucket {self.bucket_name}")
@@ -144,10 +145,11 @@ class S3Handler:
         Returns:
             bool: True if the connection is successful, False otherwise.
         """
+        self.logger.debug(f"Testing connection to bucket {self.bucket_name}")
         try:
-            _ = self.client.head_bucket(Bucket=self.bucket_name)
+            _ = self.bucket.meta.client.head_bucket(Bucket=self.bucket_name)
         except ClientError as e:
-            self.logger.error(e, exc_info=True)
+            self.logger.exception(e, exc_info=True)
             return False
         return True
 
@@ -160,10 +162,11 @@ class S3Handler:
 
         Raises:
             FileNotFoundError: If the file does not exist.
-            error: botocore.exceptions.ClientError: If the upload fails.
+            error: botocore.exceptions: If the upload fails.
         """
 
         if not exists(file_path):
+            self.logger.error(f"File {file_path} does not exist")
             raise FileNotFoundError(f"File {file_path} does not exist")
 
         if object_name is None:
@@ -172,7 +175,7 @@ class S3Handler:
 
         self.logger.debug(f"Uploading file {file_path} to {object_name}")
         try:
-            _ = self.client.upload_file(file_path, self.bucket_name, object_name, ExtraArgs={'ACL': self.acl})
+            _ = self.bucket.upload_file(file_path, object_name, ExtraArgs={'ACL': self.acl})
             self.logger.debug(f"File {file_path} uploaded successfully")
         except ClientError as error:
             if error.response['Error']['Code'] == 'LimitExceededException':
@@ -192,9 +195,10 @@ class S3Handler:
 
         Raises:
             FileNotFoundError: If the directory does not exist.
-            error: botocore.exceptions.ClientError: If the upload fails.
+            error: botocore.exceptions: If the upload fails.
         """
         if not exists(directory_path):
+            self.logger.error(f"Directory {directory_path} does not exist")
             raise FileNotFoundError(f"Directory {directory_path} does not exist")
 
         if object_name is None:
@@ -219,46 +223,107 @@ class S3Handler:
             self.logger.exception(error, exc_info=True)
             raise error
     
-    def delete_file(self, file_name):
+    def delete_file(self, file_name:str) -> None:
+        """Delete a file from the bucket.
+
+        Args:
+            file_name (str): The file name.
+
+        Raises:
+            ValueError: If the file name is None or empty.
+            TypeError: If the file name is not a string.
+            e: botocore.exceptions: If the delete fails.
+        """
+        if file_name is None:
+            self.logger.error("file_name cannot be None")
+            raise ValueError("file_name cannot be None")
+
+        if not isinstance(file_name, str):
+            self.logger.error("file_name must be a string")
+            raise TypeError("file_name must be a string")
+
+        if file_name == "":
+            self.logger.error("file_name cannot be empty")
+            raise ValueError("file_name cannot be empty")
+
         try:
-            _ = self.client.delete_object(Bucket=self.bucket_name, Key=file_name)
+            _ = self.bucket.delete_objects(Delete={'Objects': [{'Key': file_name}]})
             self.logger.debug(f"File {file_name} deleted successfully")
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-    
-    def delete_directory(self, directory_path):
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+
+    def delete_directory(self, directory_path:str) -> None:
+        """Delete a directory from the bucket.
+
+        Args:
+            directory_path (str): The directory path.
+
+        Raises:
+            ValueError: If the directory path is None or empty.
+            TypeError: If the directory path is not a string.
+            e: botocore.exceptions: If the delete fails.
+        """
+        if directory_path is None:
+            self.logger.error("directory_path cannot be None")
+            raise ValueError("directory_path cannot be None")
+
+        if not isinstance(directory_path, str):
+            self.logger.error("directory_path must be a string")
+            raise TypeError("directory_path must be a string")
+
+        if directory_path == "":
+            self.logger.error("directory_path cannot be empty")
+            raise ValueError("directory_path cannot be empty")
+
+        if directory_path[-1] != '/':
+            self.logger.debug(f"Adding '/' to directory_path {directory_path}")
+            directory_path += '/'
+
         try:
-            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=directory_path)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2*os.cpu_count()) as executor:
-                for content in response['Contents']:
-                    if content['Key'].find('/') != -1:
-                        self.logger.debug(f"Deleting file {content['Key']}")
-                        executor.submit(self.delete_file, content['Key'])
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-    
-    def list_buckets(self):
+            _ = self.bucket.objects.filter(Prefix=directory_path).delete()
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+
+    def list_buckets(self) -> list:
+        """List all the buckets.
+
+        Returns:
+            list: The list of buckets.
+
+        Raises:
+            e: botocore.exceptions: If the list fails.
+        """
+        self.logger.debug("Listing buckets")
         try:
-            response = self.client.list_buckets()
-            print(response)
-            for bucket in response['Buckets']:
-                self.logger.debug(f"Bucket: {bucket['Name']}")
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-    
-    def list_files(self, prefix=None) -> list:
+            return [bucket["Name"] for bucket in self.bucket.meta.client.list_buckets()['Buckets']]
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+
+    def list_files(self, prefix:str=None) -> list:
+        """List all the files in the bucket.
+
+        Args:
+            prefix (str, optional): The prefix. Defaults to None.
+
+        Returns:
+            list: The list of files.
+
+        Raises:
+            e: botocore.exceptions: If the list fails.
+        """
+        self.logger.debug(f"Listing files in bucket {self.bucket_name}")
         files = []
+        if prefix is not None and prefix[-1] != '/':
+            self.logger.debug(f"Adding '/' to prefix {prefix}")
+            prefix += '/'
         try:
             if prefix is None:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name)
+                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name)
             else:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
+                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
             for content in response['Contents']:
                 if prefix is not None:
                     content['Key'] = content['Key'].replace(prefix, '')
@@ -266,116 +331,248 @@ class S3Handler:
                     files.append(content['Key'])
         except KeyError:
             return []
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return []
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
         return files
-    
-    def list_directories(self, prefix=None) -> list:
+
+    def list_directories(self, prefix:str=None) -> list:
+        """List all the directories in the bucket.
+
+        Args:
+            prefix (str, optional): The prefix. Defaults to None.
+
+        Returns:
+            list: The list of directories.
+
+        Raises:
+            e: botocore.exceptions: If the list fails.
+        """
+        self.logger.debug(f"Listing directories in bucket {self.bucket_name}")
         directories = []
+        if prefix is not None and prefix[-1] != '/':
+            self.logger.debug(f"Adding '/' to prefix {prefix}")
+            prefix += '/'
         try:
             if prefix is None:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name, Delimiter='/')
+                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Delimiter='/')
             else:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
+                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
             for content in response.get('CommonPrefixes', []):
                 if prefix is not None:
                     content['Prefix'] = content['Prefix'].replace(prefix, '')
                 directories.append(content['Prefix'].replace('/', ''))
         except KeyError:
             return []
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return []
-        return directories
-    
-    def list_tree(self, prefix=None) -> list:
-        tree = []
-        try:
-            if prefix is None:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name)
-            else:
-                response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
-            for content in response['Contents']:
-                if prefix is not None:
-                    content['Key'] = content['Key'].replace(prefix, '')
-                tree.append(content['Key'])
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return []
-        return tree
-    
-    def download_file(self, file_path, object_name=None) -> bool:
-        if object_name is None:
-            object_name = os.path.basename(file_path)
-        
-        try:
-            _ = self.client.download_file(self.bucket_name, object_name, file_path)
-            self.logger.debug(f"File {file_path} downloaded successfully")
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-    
-    def download_directory(self, directory_path, object_name=None) -> bool:
-        if object_name is None:
-            object_name = os.path.basename(directory_path)
-            
-        try:
-            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=object_name)
-            for content in response['Contents']:
-                path = os.path.join(directory_path, os.path.dirname(content['Key']))
-                if not os.path.exists(path):                    
-                    os.makedirs(path)
-                self.download_file(os.path.join(path, os.path.basename(content['Key'])), content['Key'])
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-
-    def get_bucket_size(self):
-        # TODO: Fix this, now it is only getting the size of the files in the root of the bucket and not the size of the bucket
-        try:
-            # Get size of whole bucket
-            response = self.client.list_objects_v2(Bucket=self.bucket_name)
-            size = sum([content['Size'] for content in response['Contents']])
-        except KeyError:
-            return 0
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
             raise e
-        return size
-    
-    def check_file_exists(self, file_name):
+        return directories
+
+    # TODO: Add list_tree method
+
+    def download_file(self, object_name:str, save_path:str) -> None:
+        """Download a file from the bucket.
+
+        Args:
+            object_name (str): The object name.
+            save_path (str): The save path.
+
+        Raises:
+            ValueError: If the object name or save path is None or empty.
+            TypeError: If the object name or save path is not a string.
+            error: botocore.exceptions: If the download fails.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
+        if save_path is None:
+            self.logger.error("save_path cannot be None")
+            raise ValueError("save_path cannot be None")
+
+        if not isinstance(save_path, str):
+            self.logger.error("save_path must be a string")
+            raise TypeError("save_path must be a string")
+
+        if save_path == "":
+            self.logger.error("save_path cannot be empty")
+            raise ValueError("save_path cannot be empty")
+
+        save_path = normpath(save_path)
+
+        if not exists(dirname(save_path)):
+            self.logger.debug(f"Creating directory {dirname(save_path)}")
+            makedirs(dirname(save_path))
+        
+        self.logger.debug(f"Downloading file {object_name} to {save_path}")
         try:
-            _ = self.client.head_object(Bucket=self.bucket_name, Key=file_name)
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-    
-    def check_directory_exists(self, directory_path):
+            with open(save_path, 'wb') as f:
+                self.bucket.download_fileobj(object_name, f)
+        except ClientError as error:
+            self.logger.exception(error, exc_info=True)
+            raise error
+
+        self.logger.debug(f"File {object_name} downloaded successfully")
+
+    def download_directory(self, object_name:str, save_path:str) -> None:
+        """Download a directory from the bucket.
+
+        Args:
+            object_name (str): The object name.
+            save_path (str): The save path.
+
+        Raises:
+            ValueError: If the object name or save path is None or empty.
+            TypeError: If the object name or save path is not a string.
+            error: botocore.exceptions: If the download fails.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
+        if save_path is None:
+            self.logger.error("save_path cannot be None")
+            raise ValueError("save_path cannot be None")
+
+        if not isinstance(save_path, str):
+            self.logger.error("save_path must be a string")
+            raise TypeError("save_path must be a string")
+
+        if save_path == "":
+            self.logger.error("save_path cannot be empty")
+            raise ValueError("save_path cannot be empty")
+
+        save_path = normpath(save_path)
+
+        if not exists(save_path):
+            self.logger.debug(f"Creating directory {save_path}")
+            makedirs(save_path)
+
+        self.logger.debug(f"Downloading directory {object_name} to {save_path}")
+
+        n_workers = cpu_count() * 2
+        self.logger.debug(f"Downloading with {n_workers} workers")
+
+        for file in self.list_files(object_name):
+            try:
+                self.download_file(object_name + '/' + file, join(save_path, file))
+            except ClientError as error:
+                self.logger.exception(error, exc_info=True)
+                raise error
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            for directory in self.list_directories(object_name):
+                try:
+                    executor.submit(self.download_directory, object_name + '/' + directory, join(save_path, directory))
+                except ClientError as error:
+                    self.logger.exception(error, exc_info=True)
+                    raise error
+
+        self.logger.debug(f"Directory {object_name} downloaded successfully")
+
+    def get_bucket_size(self) -> int:
+        """Get the bucket size.
+
+        Returns:
+            int: The bucket size.
+
+        Raises:
+            e: botocore.exceptions: If the size cannot be calculated.
+        """
+        self.logger.debug(f"Calculating size of bucket {self.bucket_name}")
         try:
-            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=directory_path)
-            for content in response['Contents']:
-                if content['Key'].find('/') != -1:
+            total_size = 0
+            for key in self.bucket.objects.all():
+                total_size += key.size
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+        self.logger.debug(f"Size of bucket {self.bucket_name} is {size_to_human_readable(total_size)}")
+        return total_size
+
+    def check_object_exists(self, object_name:str) -> bool:
+        """Check if an object exists.
+
+        Args:
+            object_name (str): The object name.
+
+        Returns:
+            bool: True if the object exists, False otherwise.
+
+        Raises:
+            ValueError: If the object name is None or empty.
+            TypeError: If the object name is not a string.
+            e: botocore.exceptions: If the check fails.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
+        try:
+            for key in self.bucket.objects.all():
+                if key.key.find(object_name) != -1:
                     return True
-        except KeyError:
-            return False
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
         return False
-    
-    def test_connection(self) -> bool:
+
+    def get_object_path(self, object_name:str) -> str:
+        """Get the object path.
+
+        Args:
+            object_name (str): The object name.
+
+        Returns:
+            str: The object path.
+
+        Raises:
+            ValueError: If the object name is None or empty.
+            TypeError: If the object name is not a string.
+            e: botocore.exceptions: If the check fails.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
         try:
-            _ = self.client.head_bucket(Bucket=self.bucket_name)
-        except Exception as e:
-            self.logger.error(e, exc_info=True)
-            return False
-        return True
-
-s3handler = S3Handler("***REMOVED***", "***REMOVED***", "***REMOVED***")
-
-s3handler.upload_file("../test-target/backup_info.json")
-s3handler.upload_directory("../test-target/2023_11_16_20_46_54")
+            for key in self.bucket.objects.all():
+                if key.key.find(object_name) != -1:
+                    return key.key
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+        return None
