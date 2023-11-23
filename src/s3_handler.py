@@ -1,14 +1,16 @@
+"""S3Handler class."""
 import logging
 import logging.config
-import boto3
-from botocore.exceptions import ClientError
 from os import walk, cpu_count, makedirs
 from os.path import basename, exists, join, normpath, dirname
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
+import boto3
+from botocore.exceptions import ClientError
 from tools import size_to_human_readable
 
 class S3Handler:
+    """S3Handler class."""
     def __init__(self,
                 bucket_name:str,
                 access_key:str,
@@ -179,7 +181,8 @@ class S3Handler:
             self.logger.debug(f"File {file_path} uploaded successfully")
         except ClientError as error:
             if error.response['Error']['Code'] == 'LimitExceededException':
-                self.logger.warn('API call limit exceeded; backing off and retrying in 5 seconds...')
+                self.logger.warn(
+                    'API call limit exceeded; backing off and retrying in 5 seconds...')
                 sleep(5)
                 self.upload_file(file_path, object_name)
             else:
@@ -203,26 +206,28 @@ class S3Handler:
 
         if object_name is None:
             object_name = basename(directory_path)
-            
+
         self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
 
         files_to_upload = []
         for path, _, files in walk(directory_path):
             dest_path = path.replace(directory_path, "")
             for file in files:
-                files_to_upload.append((join(path, file), normpath(object_name + '/' + dest_path + '/' + file)))
+                files_to_upload.append((join(path, file),
+                                        normpath(object_name + '/' +
+                                                    dest_path + '/' + file)))
 
         n_workers = cpu_count() * 2
         self.logger.debug(f"Uploading {len(files_to_upload)} files with {n_workers} workers")
-        
+
         try:
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
-                for file_path, object_name in files_to_upload:
-                    executor.submit(self.upload_file, file_path, object_name)
+                for file_path, file_name in files_to_upload:
+                    executor.submit(self.upload_file, file_path, file_name)
         except ClientError as error:
             self.logger.exception(error, exc_info=True)
             raise error
-    
+
     def delete_file(self, file_name:str) -> None:
         """Delete a file from the bucket.
 
@@ -321,9 +326,11 @@ class S3Handler:
             prefix += '/'
         try:
             if prefix is None:
-                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name)
+                response = self.bucket.meta.client.list_objects_v2(
+                    Bucket=self.bucket_name)
             else:
-                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
+                response = self.bucket.meta.client.list_objects_v2(
+                    Bucket=self.bucket_name, Prefix=prefix)
             for content in response['Contents']:
                 if prefix is not None:
                     content['Key'] = content['Key'].replace(prefix, '')
@@ -355,9 +362,11 @@ class S3Handler:
             prefix += '/'
         try:
             if prefix is None:
-                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Delimiter='/')
+                response = self.bucket.meta.client.list_objects_v2(
+                    Bucket=self.bucket_name, Delimiter='/')
             else:
-                response = self.bucket.meta.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
+                response = self.bucket.meta.client.list_objects_v2(
+                    Bucket=self.bucket_name, Prefix=prefix, Delimiter='/')
             for content in response.get('CommonPrefixes', []):
                 if prefix is not None:
                     content['Prefix'] = content['Prefix'].replace(prefix, '')
@@ -368,8 +377,6 @@ class S3Handler:
             self.logger.exception(e, exc_info=True)
             raise e
         return directories
-
-    # TODO: Add list_tree method
 
     def download_file(self, object_name:str, save_path:str) -> None:
         """Download a file from the bucket.
@@ -412,7 +419,7 @@ class S3Handler:
         if not exists(dirname(save_path)):
             self.logger.debug(f"Creating directory {dirname(save_path)}")
             makedirs(dirname(save_path))
-        
+
         self.logger.debug(f"Downloading file {object_name} to {save_path}")
         try:
             with open(save_path, 'wb') as f:
@@ -480,7 +487,10 @@ class S3Handler:
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             for directory in self.list_directories(object_name):
                 try:
-                    executor.submit(self.download_directory, object_name + '/' + directory, join(save_path, directory))
+                    executor.submit(
+                        self.download_directory,
+                        object_name + '/' + directory,
+                        join(save_path, directory))
                 except ClientError as error:
                     self.logger.exception(error, exc_info=True)
                     raise error
@@ -504,7 +514,46 @@ class S3Handler:
         except ClientError as e:
             self.logger.exception(e, exc_info=True)
             raise e
-        self.logger.debug(f"Size of bucket {self.bucket_name} is {size_to_human_readable(total_size)}")
+        self.logger.debug(
+            f"Size of bucket {self.bucket_name} is {size_to_human_readable(total_size)}")
+        return total_size
+
+    def get_object_size(self, object_name:str) -> int:
+        """Get the object size.
+
+        Args:
+            object_name (str): The object name.
+
+        Returns:
+            int: The object size.
+
+        Raises:
+            ValueError: If the object name is None or empty.
+            TypeError: If the object name is not a string.
+            e: botocore.exceptions: If the size cannot be calculated.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
+        self.logger.debug(f"Calculating size of object {object_name}")
+        try:
+            total_size = 0
+            for key in self.bucket.objects.all():
+                if key.key.find(object_name) != -1:
+                    total_size += key.size
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e
+        self.logger.debug(f"Size of object {object_name} is {size_to_human_readable(total_size)}")
         return total_size
 
     def check_object_exists(self, object_name:str) -> bool:
