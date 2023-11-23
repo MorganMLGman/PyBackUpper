@@ -13,6 +13,7 @@ from pprint import pformat
 from shutil import Error as shutilError
 from concurrent.futures import ThreadPoolExecutor
 from re import fullmatch
+from botocore.exceptions import ClientError as botocoreClientError
 from backup import Backup
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
@@ -49,6 +50,8 @@ class BackupManager(metaclass=Singleton):
         try:
             self.load_backup_info()
         except FileNotFoundError:
+            print(listdir(self.dest_path))
+            self.logger.warning(f"Backup info not found. Creating it.")
             self.restore_backup_info()
         self.logger.info("BackupManager initialized.")
 
@@ -461,6 +464,7 @@ class BackupManager(metaclass=Singleton):
 
         Raises:
             OSError: Path cannot be created.
+            botocoreClientError: Error uploading backup info to S3.
         """
         if dest_path is None or dest_path == "":
             dest_path = self.dest_path
@@ -479,7 +483,16 @@ class BackupManager(metaclass=Singleton):
         path = normpath(join(dest_path, "backup_info.json"))
         with open(path, "w") as file:
             dump(self.__dict__(), file, indent=4)
-        self.logger.debug(f"Backup info saved to {dest_path}.")
+        self.logger.debug(f"Backup info saved locally to {dest_path}.")
+
+        if self.s3_handler:
+            try:
+                self.s3_handler.upload_file(path, "backup_info.json")
+            except botocoreClientError as e:
+                self.logger.exception(f"Error uploading backup info to S3. {e}", exc_info=True)
+                raise botocoreClientError(f"Error uploading backup info to S3. {e}")
+
+            self.logger.debug(f"Backup info saved to S3.")
 
     def load_backup_info(self, src_path:str=None, ignore_hash_mismatch:bool=True) -> None:
         """Load the backup info from a file.
@@ -511,15 +524,35 @@ class BackupManager(metaclass=Singleton):
             except FileNotFoundError:
                 self.logger.error(f"Backup {backup['name']} not found.")
                 continue
-            if (backup["raw_hash"] != tmp_backup.calculate_raw_hash(method="sha256")) or \
-                (backup["compressed_hash"] != tmp_backup.calculate_compressed_hash(method="sha256")):
-                if ignore_hash_mismatch:
-                    self.logger.warning(f"Hash mismatch for backup {backup['name']}. Loading backup anyway.")
-                else:
-                    self.logger.error(f"Hash mismatch for backup {backup['name']}. Skipping backup.")
-                    continue
+
+            if tmp_backup.completed and tmp_backup.compressed:
+                if (backup["raw_hash"] != tmp_backup.calculate_raw_hash(method="sha256")) or \
+                    (backup["compressed_hash"] != tmp_backup.calculate_compressed_hash(method="sha256")):
+                    if ignore_hash_mismatch:
+                        self.logger.warning(f"Hash mismatch for backup {backup['name']}. Loading backup anyway.")
+                    else:
+                        self.logger.error(f"Hash mismatch for backup {backup['name']}. Skipping backup.")
+                        continue
+
+            elif tmp_backup.compressed:
+                if (backup["compressed_hash"] != tmp_backup.calculate_compressed_hash(method="sha256")):
+                    if ignore_hash_mismatch:
+                        self.logger.warning(f"Hash mismatch for backup {backup['name']}. Loading backup anyway.")
+                    else:
+                        self.logger.error(f"Hash mismatch for backup {backup['name']}. Skipping backup.")
+                        continue
 
             self.backups["local"].append(tmp_backup)
+
+        for backup in backup_info["backups"]["s3"]:
+            if backup in self.backups["local"]:
+                self.backups["s3"].append(backup)
+            else:
+                try:
+                    self.backups["s3"].append(Backup(backup["name"], self.dest_path, self.ignored, self.logger))
+                except FileNotFoundError:
+                    self.logger.error(f"Backup {backup} not found.")
+                    continue
 
         self.logger.debug(f"Backup info loaded from {src_path}.")     
 
@@ -613,13 +646,84 @@ class BackupManager(metaclass=Singleton):
             self.logger.debug(f"Compression ratio of {backup.name} is {backup.calculate_compression_ratio():.2f}.")
 
         self.backups["local"].append(backup)
-        self.save_backup_info()
 
         self.logger.info(f"Backup {backup.name} created.")
         self.logger.debug(f"Backup {backup.name} size is {size_to_human_readable(backup.get_size())}.")
         return True
 
-    def get_backup_index_by_name(self, backup_name:str) -> int:
+    def upload_backup_to_s3(self, backup_name:str) -> bool:
+        """Upload a backup to S3.
+
+        Args:
+            backup_name (str): Name of the backup to upload.
+
+        Returns:
+            bool: True if the backup has been uploaded, False otherwise.
+        """
+        if self.s3_handler is None:
+            self.logger.error("S3 handler is not set.")
+            return False
+
+        self.logger.debug(f"Uploading backup {backup_name} to S3...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        if not self.backups["local"][index].completed or \
+            not self.backups["local"][index].compressed:
+            self.logger.error(f"Backup {backup_name} is not completed or compressed.")
+            return False
+
+        try:
+            self.s3_handler.upload_file(self.backups["local"][index].dest_path + "/"
+                                        + backup_name + ".zip", backup_name + ".zip")
+        except FileNotFoundError:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+        except botocoreClientError as e:
+            self.logger.exception(f"Error uploading backup {backup_name} to S3. {e}", exc_info=True)
+            return False
+
+        self.backups["s3"].append(self.backups["local"][index])
+        self.logger.debug(f"Backup {backup_name} uploaded to S3.")
+        return True
+
+    def download_backup_from_s3(self, backup_name:str) -> bool:
+        """Download a backup from S3.
+
+        Args:
+            backup_name (str): Name of the backup to download.
+
+        Returns:
+            bool: True if the backup has been downloaded, False otherwise.
+        """
+        if self.s3_handler is None:
+            self.logger.error("S3 handler is not set.")
+            return False
+
+        self.logger.debug(f"Downloading backup {backup_name} from S3...")
+
+        try:
+            self.s3_handler.download_file(backup_name + ".zip",
+                                        self.dest_path + backup_name + ".zip")
+        except botocoreClientError as e:
+            self.logger.exception(f"Error downloading backup {backup_name} from S3. {e}", exc_info=True)
+            return False
+
+        if not exists(self.dest_path + backup_name + ".zip"):
+            self.logger.error(f"Downloaded backup {backup_name} not found.")
+            return False
+
+        self.logger.debug(f"Backup {backup_name} downloaded from S3.")
+
+        self.backups["local"].append(Backup(backup_name, self.dest_path, self.ignored, self.logger))
+        self.logger.debug(f"Backup {backup_name} added to local backups.")
+        self.save_backup_info()
+        return True
+
+    def get_backup_index_by_name(self, backup_name:str, from_s3:bool=False) -> int:
         """Get the index of a backup by its name.
 
         Args:
@@ -628,7 +732,12 @@ class BackupManager(metaclass=Singleton):
         Returns:
             int: Index of the backup.
         """
-        for index, backup in enumerate(self.backups["local"]):
+        if from_s3 and self.s3_handler is None:
+            self.logger.error("S3 handler is not set.")
+            return -1
+
+        for index, backup in enumerate(
+            self.backups["local"] if not from_s3 else self.backups["s3"]):
             if backup.name == backup_name:
                 return index
         return -1
@@ -690,8 +799,34 @@ class BackupManager(metaclass=Singleton):
         return True
 
     def delete_s3_backup(self, backup_name:str) -> bool:
-        # TODO: Implement
-        pass
+        """Delete a S3 backup.
+
+        Args:
+            backup_name (str): Name of the backup to delete.
+
+        Returns:
+            bool: True if the backup has been deleted, False otherwise.
+        """
+        if self.s3_handler is None:
+            self.logger.error("S3 handler is not set.")
+            return False
+
+        self.logger.debug(f"Deleting S3 backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name, from_s3=True)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.s3_handler.delete_file(backup_name + ".zip")
+            self.backups["s3"].pop(index)
+        except botocoreClientError as e:
+            self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
+            return False
+
+        self.logger.debug(f"S3 backup {backup_name} deleted.")
+        return True
 
     def delete_backup(self, backup_name:str) -> bool:
         """Delete a backup.
@@ -711,13 +846,20 @@ class BackupManager(metaclass=Singleton):
 
         try:
             self.backups["local"][index].delete_backup()
-            # TODO: Add S3 backup deletion
             if not self.backups["local"][index].completed and \
                 not self.backups["local"][index].compressed:
                 self.backups["local"].pop(index)
         except FileNotFoundError:
             self.logger.error(f"Backup {backup_name} not found.")
             return False
+
+        if self.s3_handler:
+            try:
+                self.s3_handler.delete_file(backup_name + ".zip")
+                self.backups["s3"].pop(index)
+            except botocoreClientError as e:
+                self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
+                return False
 
         self.logger.debug(f"Backup {backup_name} deleted.")
         return True
@@ -755,26 +897,61 @@ class BackupManager(metaclass=Singleton):
 
         self.logger.debug(f"Old backups deleted.")
 
-    def run_backup(self) -> None:
-        """Run the backup."""
+    def run_backup(self) -> str:
+        """Run a backup.
+
+        Returns:
+            str: Backup name.
+        """
         start_time = datetime.now().timestamp()
         self.logger.info(f"Running backup. Start time: {timestamp_to_human_readable(start_time)}.")
 
         if self.create_backup():
-            # TODO: Add S3 backup
-            self.delete_old_backups()
             end_time = datetime.now().timestamp()
+
+            if self.s3_handler:
+                s3_result = self.upload_backup_to_s3(self.backups["local"][-1].name)
+                upload_end_time = datetime.now().timestamp()
+
+            self.delete_old_backups()
+
             self.logger.info(f"Backup completed. End time: {timestamp_to_human_readable(end_time)}.")
             self.logger.info(f"Backup duration: {time_diff_to_human_readable(round(end_time - start_time))}.")
             self.logger.info(f"""Backup info:\n{pformat(self.backups["local"][-1].__dict__(), sort_dicts=False, indent=2, compact=True)}.""")
+            if self.s3_handler and s3_result:
+                self.logger.info(f"Backup uploaded to S3. Upload duration: {time_diff_to_human_readable(round(upload_end_time - end_time))}.")
+            elif self.s3_handler and not s3_result:
+                self.logger.error(f"Backup upload to S3 failed.")
 
             if self.telegram_handler:
-                self.telegram_handler.send_message(
+                telegram_message = \
                     f"*Backup completed*\\.\n" \
                     f"""Start time: *{timestamp_to_human_readable(start_time).replace("-", "\\-")}*\\.\n""" \
                     f"End time: *{timestamp_to_human_readable(end_time).replace("-", "\\-")}*\\.\n" \
                     f"Backup duration: *{time_diff_to_human_readable(round(end_time - start_time))}*\\.\n" \
-                    f"Backup info:\n```json\n{pformat(self.backups['local'][-1].__dict__(), sort_dicts=False, indent=2, compact=True)}```\n",
+                    f"Backup info:\n```json\n{pformat(self.backups['local'][-1].__dict__(), sort_dicts=False, indent=2, compact=True)}```\n"
+                
+                if self.s3_handler:
+                    if s3_result:
+                        telegram_message += \
+                            f"Backup uploaded to S3: *{True if self.s3_handler and s3_result else False}*\\.\n" \
+                            f"Upload duration: *{time_diff_to_human_readable(round(upload_end_time - end_time)) if s3_result else 0}*\\.\n"
+
+                        try:
+                            s3_size = self.s3_handler.get_bucket_size()
+                            telegram_message += \
+                                f"S3 size: *{size_to_human_readable(s3_size).replace(".", "\\.")}*\\.\n"
+                        except botocoreClientError:
+                            self.logger.error(f"Error getting S3 size.")
+                            telegram_message += \
+                                f"*Error getting S3 size\\.*\n"
+
+                    else:
+                        telegram_message += \
+                            f"*Backup uploaded to S3 failed\\.*\n"
+
+                self.telegram_handler.send_message(
+                    telegram_message,
                     markdown=True)
         else:
             self.logger.error(f"Backup failed.")
@@ -798,3 +975,15 @@ class BackupManager(metaclass=Singleton):
                     f"*Backup info cannot be saved\\.*\n" \
                     f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
                     markdown=True)
+        except botocoreClientError:
+            self.logger.error(f"Backup info cannot be uploaded to S3.")
+            self.logger.error(f"Printing backup info:\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}")
+
+            if self.telegram_handler:
+                self.telegram_handler.send_message(
+                    f"*Backup info cannot be uploaded to S3\\.*\n" \
+                    f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
+                    markdown=True)
+
+        return self.backups["local"][-1].name
+
