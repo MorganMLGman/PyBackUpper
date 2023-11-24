@@ -5,43 +5,85 @@
 <head>
     <title>PyBackUpper</title>
     {% block styles %}
-    <link rel="stylesheet"  type="text/css" href="{{url_for('.static', filename='style.css')}}">        
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{url_for('.static', filename='style.css')}}" rel="stylesheet">   
     {% endblock %}
 </head>
  
-<body>
+<body data-bs-theme="dark">
 {% block body %}
-    <h1 class="inline">PyBackUpper</h1>
-
-    <button class="inline align-right" onclick="window.location.href='/backup'">Backup now</button>
-
-    <h2>Hostname: {{hostname}}</h2>
-
-    <h3>Last backup: {{last_backup}}</h3>
-    <h3>Next backup: {{next_backup}}</h3>
-
-    <p>Local size: {{local_size}}</p>
-    <p>Free space: {{free_space}}</p>
-    <p>S3 size: {{s3_size}}</p>
-
-    <table>
-        <tr>
-            <th>Backup</th>
-            <th>Size</th>
-            <th>Local</th>
-            <th>S3</th>
-        </tr>
-        {% for backup in backups %}
-        <tr>
-            <td>{{ backup.name }}</td>
-            <td>{{ backup.size }}</td>
-            <td>{% if backup.local == True %}✅{% else %}❌{% endif %}</td>
-            <td>{% if backup.s3 == True %}✅{% else %}❌{% endif %}</td>
-        </tr>
-        {% endfor %} 
-    </table>
+    <nav class="navbar sticky-top bg-body-tertiary border-bottom border-body" data-bs-theme="dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">PyBackUpper</a>
+            <div class="spinner-border text-danger ms-auto mx-2" role="status" id="loadingSpinner" style="display: block;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <a href="/backup-now" class="btn btn-primary">BACKUP NOW</a>
+        </div>
+    </nav>
+    <div class="container my-2">
+        <div class="row">
+            <div class="col">
+                <h2>Backups</h2>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col" class="text-end">Size</th>
+                            <th scope="col" class="text-end">RAW</th>
+                            <th scope="col" class="text-end">ZIP</th>
+                            <th scope="col" class="text-end">S3</th>
+                            <th scope="col" class="text-end actions-column">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="align-baseline">2023_11_24_16_04_22</td>
+                            <td class="align-baseline text-end">1.2GB</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end actions-column">
+                                <a href="/download" class="btn btn-primary">Download</a>
+                                <a href="/upload" class="btn btn-success">Upload</a>
+                                <a href="/zip" class="btn btn-primary">Zip</a>
+                                <a href="/unzip" class="btn btn-primary">Unzip</a>
+                                <a href="/restore" class="btn btn-warning">Restore</a>
+                                <a href="/delete" class="btn btn-danger">Delete</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="align-baseline">2023_11_24_16_04_22</td>
+                            <td class="align-baseline text-end">1.2GB</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end">❌</td>
+                            <td class="align-baseline text-end">❌</td>
+                            <td class="align-baseline text-end actions-column">
+                                <a href="/upload" class="btn btn-success">Upload</a>
+                                <a href="/zip" class="btn btn-primary">Zip</a>
+                                <a href="/restore" class="btn btn-warning">Restore</a>
+                                <a href="/delete" class="btn btn-danger">Delete</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="align-baseline">2023_11_24_16_04_22</td>
+                            <td class="align-baseline text-end">1.2GB</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end">✅</td>
+                            <td class="align-baseline text-end actions-column">
+                                <a href="/download" class="btn btn-primary">Download</a>
+                                <a href="/unzip" class="btn btn-primary">Unzip</a>
+                                <a href="/restore" class="btn btn-warning">Restore</a>
+                                <a href="/delete" class="btn btn-danger">Delete</a>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 {% endblock %}
- 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
- 
-</html>
+</html
