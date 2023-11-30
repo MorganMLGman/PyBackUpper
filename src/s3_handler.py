@@ -625,3 +625,16 @@ class S3Handler:
             self.logger.exception(e, exc_info=True)
             raise e
         return None
+
+    def clear_bucket(self) -> None:
+        """Clear the bucket.
+
+        Raises:
+            e: botocore.exceptions: If the clear fails.
+        """
+        self.logger.debug(f"Clearing bucket {self.bucket_name}")
+        try:
+            _ = self.bucket.objects.all().delete()
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e

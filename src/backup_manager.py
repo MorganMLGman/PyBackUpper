@@ -4,17 +4,20 @@ import logging
 import logging.config
 from logging.handlers import TimedRotatingFileHandler
 from singleton import Singleton
-from os.path import exists, normpath, getsize, join
-from os import makedirs, walk, listdir
+from os.path import exists, normpath, getsize, join, isfile, isdir
+from os import makedirs, walk, listdir, remove, rmdir
 from datetime import datetime
 from psutil import disk_usage
 from json import dump, load
 from pprint import pformat
 from shutil import Error as shutilError
+from shutil import rmtree
 from concurrent.futures import ThreadPoolExecutor
+from threading import Thread
 from re import fullmatch
 from botocore.exceptions import ClientError as botocoreClientError
 from backup import Backup
+from time import sleep
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
 from tools import *
@@ -589,6 +592,7 @@ class BackupManager(metaclass=Singleton):
                                     self.logger)))
 
         self.backups["local"].sort(key=lambda x: x.name, reverse=False)
+        self.backups["s3"].sort(key=lambda x: x.name, reverse=False)
         if len(self.backups["local"]) > 0:
             self.logger.debug(f"Restored backups\n{pformat(backups_list, sort_dicts=False, compact=True, indent=2)}\nfrom {src_path}")
             self.save_backup_info()
@@ -736,8 +740,7 @@ class BackupManager(metaclass=Singleton):
             self.logger.error("S3 handler is not set.")
             return -1
 
-        for index, backup in enumerate(
-            self.backups["local"] if not from_s3 else self.backups["s3"]):
+        for index, backup in enumerate(self.backups["local"] if not from_s3 else self.backups["s3"]):
             if backup.name == backup_name:
                 return index
         return -1
@@ -759,13 +762,20 @@ class BackupManager(metaclass=Singleton):
             return False
 
         try:
+            backup = self.backups["local"][index]
             self.backups["local"][index].delete_raw_backup()
             if not self.backups["local"][index].completed and \
                 not self.backups["local"][index].compressed:
                 self.backups["local"].pop(index)
+            if self.s3_handler:
+                index_s3 = self.get_backup_index_by_name(backup.name, from_s3=True)
+                self.backups["s3"][index_s3].update(backup)
         except FileNotFoundError:
             self.logger.error(f"Backup {backup_name} not found.")
             return False
+        except botocoreClientError as e:
+            self.logger.exception(f"Error updating backup {backup_name} in S3. {e}", exc_info=True)
+            pass
 
         self.logger.debug(f"Raw backup {backup_name} deleted.")
         return True
@@ -787,13 +797,20 @@ class BackupManager(metaclass=Singleton):
             return False
 
         try:
+            backup = self.backups["local"][index]
             self.backups["local"][index].delete_compressed_backup()
             if not self.backups["local"][index].completed and \
                 not self.backups["local"][index].compressed:
                 self.backups["local"].pop(index)
+            if self.s3_handler:
+                index_s3 = self.get_backup_index_by_name(backup.name, from_s3=True)
+                self.backups["s3"][index_s3].update(backup)
         except FileNotFoundError:
             self.logger.error(f"Backup {backup_name} not found.")
             return False
+        except botocoreClientError as e:
+            self.logger.exception(f"Error updating backup {backup_name} in S3. {e}", exc_info=True)
+            pass
 
         self.logger.debug(f"Compressed backup {backup_name} deleted.")
         return True
@@ -897,7 +914,18 @@ class BackupManager(metaclass=Singleton):
 
         self.logger.debug(f"Old backups deleted.")
 
-    def run_backup(self) -> str:
+    def clear_dest_path(self) -> None:
+        # dont remove dest_path itself
+        self.logger.debug(f"Clearing {self.dest_path}...")
+        for item in listdir(self.dest_path):
+            item_path = join(self.dest_path, item)
+            if isfile(item_path):
+                remove(item_path)
+            elif isdir(item_path):
+                rmtree(item_path)
+        self.logger.debug(f"{self.dest_path} cleared.")
+
+    def run_backup(self, callback=None) -> str:
         """Run a backup.
 
         Returns:
@@ -912,6 +940,10 @@ class BackupManager(metaclass=Singleton):
             if self.s3_handler:
                 s3_result = self.upload_backup_to_s3(self.backups["local"][-1].name)
                 upload_end_time = datetime.now().timestamp()
+
+            if callback:
+                sleep(10)
+                callback(True, "Backup completed.")
 
             self.delete_old_backups()
 
