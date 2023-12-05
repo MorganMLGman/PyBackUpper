@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+    <h2>Backups</h2>
+    {% if backups | length == 0 %}
+        <h3 class="alert alert-warning">No backups found.</h3>
+    {% else %}
+        <p>Found {{ backups|length }} backups.</p>
+        <p >Local size: <strong>{{ local_size }}</strong>, S3 size: <strong>{{ s3_size }}</strong></p>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col" class="text-end">Size</th>
+                    <th scope="col" class="text-end">RAW</th>
+                    <th scope="col" class="text-end">ZIP</th>
+                    <th scope="col" class="text-end">S3</th>
+                    <th scope="col" class="text-end actions-column">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for backup in backups %}
+                    <tr>
+                        <td class="align-baseline">{{ backup.name }}</td>
+                        <td class="align-baseline text-end">{{ backup.size }}</td>
+                        {% if backup.raw %}
+                            <td class="align-baseline text-end">✅</td>
+                        {% else %}
+                            <td class="align-baseline text-end">❌</td>
+                        {% endif %}
+                        {% if backup.zip %}
+                            <td class="align-baseline text-end">✅</td>
+                        {% else %}
+                            <td class="align-baseline text-end">❌</td>
+                        {% endif %}
+                        {% if backup.s3 %}
+                            <td class="align-baseline text-end">✅</td>
+                        {% else %}
+                            <td class="align-baseline text-end">❌</td>
+                        {% endif %}
+                        <td class="align-baseline text-end actions-column">
+                            {% if backup.raw %}
+                                <form action="/restore?name={{ backup.name }}" method="POST" class="d-inline">
+                                    <button class="btn btn-warning" type="submit" {% if pending_backup %}disabled{% endif %}>Restore</button>
+                                </form>
+                            {% endif %}
+                            {% if backup.zip and not backup.raw %}
+                                <form action="/unzip?name={{ backup.name }}" method="POST" class="d-inline">
+                                    <button class="btn btn-primary" type="submit" {% if pending_backup %}disabled{% endif %}>Unzip</button>
+                                </form>
+                            {% endif %}
+                            {% if backup.s3 and not backup.zip %}
+                                <form action="/download?name={{ backup.name }}" method="POST" class="d-inline">
+                                    <button class="btn btn-primary" type="submit" {% if pending_backup %}disabled{% endif %}>Download</button>
+                                </form>
+                            {% endif %}
+                            <form action="/delete?name={{ backup.name }}" method="POST" class="d-inline">
+                                <button class="btn btn-danger" type="submit" {% if pending_backup %}disabled{% endif %}>Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

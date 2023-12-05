@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Schedulers{% endblock %}
+
+{% block content %}
+    <!-- Modal -->
+    <div class="modal fade" id="staticBackdrop" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+        <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+            <h1 class="modal-title fs-5" id="staticBackdropLabel">Add scheduler</h1>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="/add_scheduler" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="input-group mb-3">
+                        <div class="row">
+                            <div class="col d-flex">
+                                <span class="input-group-text d-inline">Hour</span>
+                                <input type="text" class="form-control d-inline" id="hour1" name="hour1" value="0" oninput="validateHour(this)" aria-label="Hour">
+                            </div>
+                            <div class="col d-flex">
+                                <span class="input-group-text d-inline">Minute</span>
+                                <input type="text" class="form-control d-inline" id="minute1" name="minute1" value="0" oninput="validateMinute(this)" aria-label="Minute">
+                            </div>
+                        </div>     
+                    </div>
+                    <div class="input-group mb-3">
+                        <div class="row">
+                            <div class="col d-flex">
+                                <span class="input-group-text d-inline">Month</span>
+                                <input type="text" class="form-control d-inline" id="month1" name="month1" value="*" oninput="validateMonth(this)" aria-label="Month">
+                            </div>
+                            <div class="col d-flex">
+                                <span class="input-group-text d-inline">Day</span>
+                                <input type="text" class="form-control d-inline" id="day1" name="day1" value="*" oninput="validateDay(this)" aria-label="Day">
+                            </div>
+                        </div> 
+                    </div>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">Day of week</span>
+                        <input type="text" class="form-control" id="dow1" name="dow1" value="*" oninput="validateDOW(this)" aria-label="Day of week" aria-describedby="dowHelp">
+                        <div class="form-text input-group" id="dowHelp">MON,THU,WED,... or *</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Add</button>
+                </div>
+            </form>            
+        </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+        <h2>Schedulers</h2>
+        <button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
+            Add scheduler
+        </button>
+    </div>
+
+    {% if schedulers %}
+        <p>Found {{ schedulers|length }} schedulers.</p>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th scope="col">ID</th>
+                    <th scope="col" class="text-end">Cron</th>
+                    <th scope="col" class="text-end">Next run</th>
+                    <th scope="col" class="text-end actions-column">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for scheduler in schedulers %}
+                    <tr>
+                        <td class="align-baseline">{{ scheduler.id }}</td>
+                        <td class="align-baseline text-end">{{ scheduler.cron }}</td>
+                        <td class="align-baseline text-end">{{ scheduler.next_run }}</td>
+                        <td class="align-baseline text-end">
+                            <form action="/delete_scheduler?id={{ scheduler.id }}" method="POST" class="d-inline">
+                                <button class="btn btn-danger" type="submit" {% if pending_backup %}disabled{% endif %}>Delete</button>
+                            </form>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <h3 class="alert alert-warning">No schedulers found.</h3>
+    {% endif %}
+
+    <script>
+        function validateHour(input) {
+            if (!/^([01]?[0-9]|2[0-3]|\*)$/.test(input.value)) {
+                input.setCustomValidity('Invalid hour. Allowed values are from 0 to 23 or *');
+            } else {
+                input.setCustomValidity('');
+            }
+        }
+    
+        function validateMinute(input) {
+            if (!/^([0-5]?[0-9]|\*)$/.test(input.value)) {
+                input.setCustomValidity('Invalid minute. Allowed values are from 0 to 59 or *');
+            } else {
+                input.setCustomValidity('');
+            }
+        }
+
+        function validateDay(input) {
+            if (!/^([0-2]?[0-9]|3[01]|\*)$/.test(input.value)) {
+                input.setCustomValidity('Invalid day. Allowed values are from 0 to 31 or *');
+            } else {
+                input.setCustomValidity('');
+            }
+        }
+
+        function validateDOW(input) {
+            if (!/^((MON|TUE|WED|THU|FRI|SAT|SUN)(,(MON|TUE|WED|THU|FRI|SAT|SUN))*|\*)$/i.test(input.value)) {
+                input.setCustomValidity('Invalid day of week. Allowed values are MON,TUE,WED,THU,FRI,SAT,SUN, comma-separated lists of these, or *');
+            } else {
+                input.setCustomValidity('');
+            }
+        }
+    </script>
+{% endblock %}

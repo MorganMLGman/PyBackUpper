@@ -1,11 +1,13 @@
 import logging
 import logging.config
 from secrets import token_hex
-from flask import Flask, render_template, redirect, url_for, session
+from flask import Flask, render_template, redirect, url_for, session, request
+from flask_wtf.csrf import CSRFProtect
 from flask.logging import default_handler
 from threading import Thread
 from backup_manager import BackupManager
 from s3_handler import S3Handler
+from scheduler import Scheduler
 from tools import *
 
 class Message():
@@ -49,14 +51,19 @@ class Server(Flask):
         self.backupper = backupper
         self.logger = logger
         self.pending_backup = False
+        self.schedulers_list = []
         
         super().logger.removeHandler(default_handler)
         super().logger.addHandler(x for x in self.logger.handlers)
         self.add_url_rule('/', view_func=self.index)
         self.add_url_rule('/backup_info', view_func=self.backup_info, methods=['GET'])
         self.add_url_rule('/backup_now', view_func=self.backup_now, methods=['POST'])
+
+        self.add_url_rule('/schedulers', view_func=self.schedulers)
+        self.add_url_rule('/add_scheduler', view_func=self.add_scheduler, methods=['POST'])
         self.config["SERVER_NAME"] = "127.0.0.1:5000"
-        self.secret_key = token_hex(16)
+        self.config["SECRET_KEY"] = token_hex(16)
+        self.csrf = CSRFProtect(self)
 
     @property
     def logger(self):
@@ -98,7 +105,7 @@ class Server(Flask):
         
         backups.sort(key=lambda x: x["name"], reverse=True)
         
-        return render_template('index.html',
+        return render_template('home.html',
                                 pending_backup=self.pending_backup,
                                 message=message,
                                 backups=backups,
@@ -125,4 +132,24 @@ class Server(Flask):
         with self.app_context():
             return redirect(url_for('index'))
 
+    def schedulers(self):
+        tmp_schedulers = [scheduler.__dict__() for scheduler in self.schedulers_list]
+        return render_template('schedulers.html', schedulers=tmp_schedulers, pending_backup=self.pending_backup)
+
+    def add_scheduler(self):
+        form = {}
+        for key in request.form:
+            form[key] = request.form[key]
+        
+        cron = Scheduler.to_cron(
+            form["minute1"],
+            form["hour1"],
+            form["dow1"],
+            form["day1"],
+            form["month1"])
+        
+        print(cron)
+
+        self.schedulers_list.append(Scheduler(self.backupper, cron=cron))
+        return redirect(url_for('schedulers'))
 

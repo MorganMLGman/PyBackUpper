@@ -5,7 +5,7 @@ import logging.config
 from logging.handlers import TimedRotatingFileHandler
 from singleton import Singleton
 from os.path import exists, normpath, getsize, join, isfile, isdir
-from os import makedirs, walk, listdir, remove, rmdir
+from os import makedirs, walk, listdir, remove
 from datetime import datetime
 from psutil import disk_usage
 from json import dump, load
@@ -17,7 +17,6 @@ from threading import Thread
 from re import fullmatch
 from botocore.exceptions import ClientError as botocoreClientError
 from backup import Backup
-from time import sleep
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
 from tools import *
@@ -104,6 +103,7 @@ class BackupManager(metaclass=Singleton):
             "compressed_to_keep": self.compressed_to_keep,
             "local_size": size_to_human_readable(sum([backup.get_size() for backup in self.backups["local"]])),
             "s3_size": size_to_human_readable(self.s3_handler.get_bucket_size() if not self.s3_handler is None else 0),
+            "s3_to_keep": self.s3_to_keep,
             "backups": self.backups,
         }
 
@@ -942,7 +942,6 @@ class BackupManager(metaclass=Singleton):
                 upload_end_time = datetime.now().timestamp()
 
             if callback:
-                sleep(10)
                 callback(True, "Backup completed.")
 
             self.delete_old_backups()
