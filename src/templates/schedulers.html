@@ -78,7 +78,9 @@
                         <td class="align-baseline text-end">{{ scheduler.cron }}</td>
                         <td class="align-baseline text-end">{{ scheduler.next_run }}</td>
                         <td class="align-baseline text-end">
-                            <form action="/delete_scheduler?id={{ scheduler.id }}" method="POST" class="d-inline">
+                            <form action="/delete_scheduler" method="POST" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="sched_id" value="{{ scheduler.id }}">
                                 <button class="btn btn-danger" type="submit" {% if pending_backup %}disabled{% endif %}>Delete</button>
                             </form>
                     </tr>

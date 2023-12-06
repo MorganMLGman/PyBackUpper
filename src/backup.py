@@ -451,50 +451,32 @@ class Backup(dict):
 
     def delete_raw_backup(self) -> None:
         """Deletes raw backup.
-
-        Raises:
-            FileNotFoundError: Backup is not completed.
         """
-        if not self.completed:
-            self.logger.error(f"Backup {self.name} is not completed.")
-            raise FileNotFoundError(f"Backup {self.name} is not completed.")
-
         self.logger.debug(f"Deleting raw backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
-        shutil.rmtree(backup_path)
+        shutil.rmtree(backup_path, ignore_errors=True)
 
         self.completed = False
         self.logger.debug(f"Backup {self.name} deleted.")
 
     def delete_compressed_backup(self) -> None:
         """Deletes compressed backup.
-
-        Raises:
-            FileNotFoundError: Backup is not compressed.
         """
-        if not self.compressed:
-            self.logger.error(f"Backup {self.name} is not compressed.")
-            raise FileNotFoundError(f"Backup {self.name} is not compressed.")
-
         self.logger.debug(f"Deleting compressed backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
-        remove(f"{backup_path}.zip")
+        try:
+            remove(f"{backup_path}.zip")
+        except FileNotFoundError:
+            pass
 
         self.compressed = False
         self.logger.debug(f"Backup {self.name} deleted.")
 
     def delete_backup(self) -> None:
         """Deletes backup.
-
-        Raises:
-            FileNotFoundError: Backup is not completed.
         """
-        if not self.completed:
-            self.logger.error(f"Backup {self.name} is not completed.")
-            raise FileNotFoundError(f"Backup {self.name} is not completed.")
-
         self.logger.debug(f"Deleting backup {self.name}.")
 
         self.delete_raw_backup()
@@ -511,7 +493,7 @@ class Backup(dict):
             restore_path (str): Destination path of the backup.
 
         Raises:
-            FileExistsError: Backup is already completed.
+            FileExistsError: Backup is not completed.
             FileNotFoundError: Backup does not exist.
             shutil.Error: Backup failed.
         """

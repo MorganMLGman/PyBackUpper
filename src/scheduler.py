@@ -10,44 +10,36 @@ from threading import Thread
 from time import sleep
 
 class Scheduler(BlockingScheduler):
-    def __init__(self, backupper:BackupManager, logger:logging.Logger=None, cron:str="0 0 * * *", timezone:str="UTC"):
+    def __init__(self, backupper:BackupManager, trigger:CronTrigger, logger:logging.Logger=None):
         super().__init__()
         self.logger = logger
         self.backupper = backupper
-        if not isinstance(cron, str) or not isinstance(timezone, str):
-            self.logger.error("Invalid cron or timezone")
-            raise ValueError("Invalid cron or timezone")
-        if not cron or not timezone:
-            self.logger.error("Invalid cron or timezone")
-            raise ValueError("Invalid cron or timezone")
-        if not fullmatch(r'^(([1-5]?[0-9]|\*)\s){4}([1-5]?[0-9]|\*)$', cron):
-            self.logger.error("Invalid cron")
-            raise ValueError("Invalid cron")
-        self.cron = cron
-        if not fullmatch(r'^[\w\/\-]+$', timezone):
-            self.logger.error("Invalid timezone")
-            raise ValueError("Invalid timezone")
-        self.cron = CronTrigger.from_crontab(cron, timezone=timezone)
+        self.trigger = trigger
         self.sched_job = self.add_job(
             self.backupper.run_backup,
-            trigger=self.cron,
-            id=f"backup_job_{cron.replace(' ', '_')}",
-            name=f"Backup job with cron: {cron} and timezone: {timezone}")
-        self.logger.info(f"Scheduler configured with cron: {cron} and timezone: {timezone}")
+            trigger=self.trigger,
+            id="backup_job_" + "_".join(str(x) for x in self.trigger.fields),
+            name=f"Backup job with cron: {self.trigger.fields} and timezone: {self.trigger.timezone}")
+        self.logger.info(f"Scheduler configured with cron: {self.trigger.fields} and timezone: {self.trigger.timezone}")
 
     def __del__(self)->None:
         self.shutdown()
         self.logger.info("Scheduler stopped")
 
     def __str__(self)->str:
-        return f"Scheduler with cron: {self.cron} and timezone: {self.timezone}. Next run: {timestamp_to_human_readable(self.cron.get_next_fire_time(datetime.now(), datetime.now()).timestamp())}"
+        return f"Scheduler with cron: {self.trigger.fields} \
+            and timezone: {self.trigger.timezone}. \
+            Next run: {timestamp_to_human_readable(
+                self.trigger.get_next_fire_time(
+                    datetime.now(),
+                    datetime.now()).timestamp())}"
 
     def __dict__(self)->dict:
         return {
             "id": self.sched_job.id,
-            "cron": self.cron,
-            "timezone": self.timezone,
-            "next_run": timestamp_to_human_readable(self.cron.get_next_fire_time(datetime.now(), datetime.now()).timestamp())
+            "cron": ", ".join(f"{x.name}: {str(x)}" for x in self.trigger.fields),
+            "timezone": self.trigger.timezone,
+            "next_run": timestamp_to_human_readable(self.trigger.get_next_fire_time(datetime.now(), datetime.now()).timestamp())
         }
 
     @property
@@ -97,7 +89,7 @@ class Scheduler(BlockingScheduler):
         self._backupper = backupper
 
     @staticmethod
-    def to_cron(minute:str="0", hour:str="0", day_of_week:str="*", day_of_month:str="*", month:str="*")->str:
+    def to_CronTrigger(minute:str="0", hour:str="0", day_of_week:str="*", day_of_month:str="*", month:str="*", timezone:str="UTC")->CronTrigger:
         """Convert the given parameters to a cron expression.
 
         Args:
@@ -106,12 +98,13 @@ class Scheduler(BlockingScheduler):
             day_of_week (str, optional): Day of week. Defaults to "*". For example: "0,1,2,3,4,5,6" or "MON,TUE,WED,THU,FRI,SAT,SUN".
             day_of_month (str, optional): Day of month. Defaults to "*".
             month (str, optional): Month. Defaults to "*".
+            timezone (str, optional): Timezone. Defaults to "UTC".
 
         Raises:
             ValueError: If one of the parameters is invalid.
 
         Returns:
-            str: The cron expression.
+            CronTrigger: The CronTrigger instance.
         """
 
         if minute is None or not isinstance(minute, str):
@@ -161,8 +154,18 @@ class Scheduler(BlockingScheduler):
                 if i_month < 0 or i_month > 12:
                     raise ValueError("Invalid month")
 
+        if timezone is None or not isinstance(timezone, str):
+            raise ValueError("Invalid timezone")
+        if not fullmatch(r'^[\w\/\-]+$', timezone):
+            raise ValueError("Invalid timezone")
+
         if day_of_week == "*":
-            return f"0 {minute} {hour} {day_of_month} {month} *"
+            return CronTrigger(
+                minute=minute,
+                hour=hour,
+                day=day_of_month,
+                month=month,
+                timezone=timezone)
 
         day_of_week = day_of_week.lower().split(",")
 
@@ -178,4 +181,10 @@ class Scheduler(BlockingScheduler):
 
                 day_of_week[i] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][i_day]
 
-        return f"0 {minute} {hour} {day_of_month} {month} {','.join(day_of_week)}"
+        return CronTrigger(
+            minute=minute,
+            hour=hour,
+            day=day_of_month,
+            day_of_week=",".join(day_of_week),
+            month=month,
+            timezone=timezone)

@@ -638,3 +638,39 @@ class S3Handler:
         except ClientError as e:
             self.logger.exception(e, exc_info=True)
             raise e
+
+    def create_download_link(self, object_name:str, expiration:int=3600) -> str:
+        """Create a download link for an object.
+
+        Args:
+            object_name (str): The object name.
+            expiration (int, optional): The expiration time in seconds. Defaults to 3600.
+
+        Returns:
+            str: The download link.
+
+        Raises:
+            ValueError: If the object name is None or empty.
+            TypeError: If the object name is not a string.
+            e: botocore.exceptions: If the link cannot be created.
+        """
+        if object_name is None:
+            self.logger.error("object_name cannot be None")
+            raise ValueError("object_name cannot be None")
+
+        if not isinstance(object_name, str):
+            self.logger.error("object_name must be a string")
+            raise TypeError("object_name must be a string")
+
+        if object_name == "":
+            self.logger.error("object_name cannot be empty")
+            raise ValueError("object_name cannot be empty")
+
+        try:
+            return self.bucket.meta.client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': object_name},
+                ExpiresIn=expiration)
+        except ClientError as e:
+            self.logger.exception(e, exc_info=True)
+            raise e

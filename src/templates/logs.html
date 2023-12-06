@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Logs{% endblock %}
+
+{% block content %}
+<div id="log" style="position: absolute; top: 60px; bottom: 0; left: 0; right: 0; overflow: auto;">
+    <pre id="log-content">
+{{ log }}
+    </pre>
+</div>
+
+<script>
+    window.onload = function() {
+        var element = document.getElementById("log");
+        element.scrollTop = element.scrollHeight;
+
+        var logContent = document.getElementById("log-content");
+        logContent.innerHTML = logContent.innerHTML
+        .replace(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/g, '<span style="color: green;">$1</span>')
+        .replace(/(DEBUG\(\))/g, '<span style="color: lightgrey;">$1</span>')
+        .replace(/(INFO\(\))/g, '<span style="color: cyan;">$1</span>')
+        .replace(/(WARNING\(\))/g, '<span style="color: orange;">$1</span>')
+        .replace(/(ERROR\(\))/g, '<span style="color: red;">$1</span>')
+        .replace(/(EXCEPTION\(\))/g, '<span style="color: red;">$1</span>');
+    }
+</script>
+{% endblock %}

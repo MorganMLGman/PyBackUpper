@@ -2,7 +2,7 @@
 
 {% block title %}Home{% endblock %}
 
-{% block content %}
+{% block content %}  
     <h2>Backups</h2>
     {% if backups | length == 0 %}
         <h3 class="alert alert-warning">No backups found.</h3>
@@ -42,27 +42,66 @@
                         {% endif %}
                         <td class="align-baseline text-end actions-column">
                             {% if backup.raw %}
-                                <form action="/restore?name={{ backup.name }}" method="POST" class="d-inline">
-                                    <button class="btn btn-warning" type="submit" {% if pending_backup %}disabled{% endif %}>Restore</button>
-                                </form>
+                                <button class="d-inline btn btn-warning" onclick="setModal('{{ backup.name }}')" data-bs-toggle="modal" data-bs-target="#staticBackdrop" {% if pending_backup %}disabled{% endif %}>Restore</button>
                             {% endif %}
                             {% if backup.zip and not backup.raw %}
-                                <form action="/unzip?name={{ backup.name }}" method="POST" class="d-inline">
+                                <form action="/unzip_backup" method="POST" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="name" value="{{ backup.name }}">
                                     <button class="btn btn-primary" type="submit" {% if pending_backup %}disabled{% endif %}>Unzip</button>
                                 </form>
                             {% endif %}
                             {% if backup.s3 and not backup.zip %}
-                                <form action="/download?name={{ backup.name }}" method="POST" class="d-inline">
-                                    <button class="btn btn-primary" type="submit" {% if pending_backup %}disabled{% endif %}>Download</button>
+                                <form action="/download_backup" method="POST" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="name" value="{{ backup.name }}">
+                                    <button class="btn btn-primary" type="submit" title="Download backup from S3 to server." {% if pending_backup %}disabled{% endif %}>Download S3</button>
                                 </form>
                             {% endif %}
-                            <form action="/delete?name={{ backup.name }}" method="POST" class="d-inline">
+                            <form action="/delete_backup" method="POST" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="name" value="{{ backup.name }}">
                                 <button class="btn btn-danger" type="submit" {% if pending_backup %}disabled{% endif %}>Delete</button>
                             </form>
+                            <a href="/info/{{ backup.name }}" class="btn btn-info">Info</a>
+                            <a href="/download/{{ backup.name }}" class="btn btn-outline-primary" title="Download zip to local device.">Download</a>
                         </td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     {% endif %}
+
+    <div class="modal fade" id="staticBackdrop" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h1 class="modal-title fs-5" id="staticBackdropLabel">Restore backup</h1>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="/restore_backup" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-body">
+                        <div class="input-group mb-3">
+                            <span class="input-group-text d-inline">Backup name</span>
+                            <input type="text" class="form-control d-inline" id="backup_name" name="backup_name" value="" aria-label="backup_name" readonly>
+                        </div>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text d-inline">File path</span>
+                            <input type="text" class="form-control d-inline" id="file_path" name="file_path" value="../test-restore" aria-label="file_path" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="submit" class="btn btn-outline-warning">Restore</button>
+                    </div>
+                </form>            
+            </div>
+        </div>
+    </div>
+    <script>
+        function setModal(backupName) {
+            document.getElementById('backup_name').value = backupName;
+        }
+    </script>
 {% endblock %}

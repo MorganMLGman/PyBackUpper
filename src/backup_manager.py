@@ -13,9 +13,9 @@ from pprint import pformat
 from shutil import Error as shutilError
 from shutil import rmtree
 from concurrent.futures import ThreadPoolExecutor
-from threading import Thread
 from re import fullmatch
 from botocore.exceptions import ClientError as botocoreClientError
+from filecmp import dircmp
 from backup import Backup
 from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
@@ -34,6 +34,7 @@ class BackupManager(metaclass=Singleton):
                 telegram_handler=None,
                 logger:logging.Logger=None) -> None:
         self.logger = logger
+        self.pending_backup = False
         self.src_path = src_path
         self.dest_path = dest_path
         self.ignored = ignored
@@ -375,6 +376,28 @@ class BackupManager(metaclass=Singleton):
         else:
             self._telegram_handler = telegram_handler
 
+    @property
+    def pending_backup(self) -> bool:
+        """Get the pending backup flag.
+
+        Returns:
+            bool: Pending backup flag.
+        """
+        return self._pending_backup
+
+    @pending_backup.setter
+    def pending_backup(self, pending_backup:bool) -> None:
+        """Set the pending backup flag.
+
+        Args:
+            pending_backup (bool): Pending backup flag.
+        """
+        if not type(pending_backup) is bool:
+            self.logger.error("pending_backup must be a boolean.")
+            raise TypeError("pending_backup must be a boolean.")
+
+        self._pending_backup = pending_backup
+
     def generate_backup_name(self) -> str:
         """Generate a backup name.
 
@@ -703,28 +726,45 @@ class BackupManager(metaclass=Singleton):
         Returns:
             bool: True if the backup has been downloaded, False otherwise.
         """
+        if self.pending_backup:
+            self.logger.error("Backup task is running, need to wait for it to finish.")
+            return False
+        self.pending_backup = True
         if self.s3_handler is None:
             self.logger.error("S3 handler is not set.")
             return False
 
         self.logger.debug(f"Downloading backup {backup_name} from S3...")
 
+        for backup in self.backups["local"]:
+            if backup.name == backup_name and backup.compressed:
+                self.logger.debug(f"Backup {backup_name} already exists.")
+                self.pending_backup = False
+                return True
+
         try:
             self.s3_handler.download_file(backup_name + ".zip",
-                                        self.dest_path + backup_name + ".zip")
+                                        self.dest_path + "/" +  backup_name + ".zip")
         except botocoreClientError as e:
             self.logger.exception(f"Error downloading backup {backup_name} from S3. {e}", exc_info=True)
+            self.pending_backup = False
             return False
 
-        if not exists(self.dest_path + backup_name + ".zip"):
+        if not exists(self.dest_path + "/" + backup_name + ".zip"):
             self.logger.error(f"Downloaded backup {backup_name} not found.")
+            self.pending_backup = False
             return False
 
         self.logger.debug(f"Backup {backup_name} downloaded from S3.")
-
-        self.backups["local"].append(Backup(backup_name, self.dest_path, self.ignored, self.logger))
+        backup = Backup(backup_name, self.dest_path, self.ignored, self.logger)
+        self.backups["local"].append(backup)
+        self.backups["s3"][self.get_backup_index_by_name(backup_name, from_s3=True)].update(backup)
         self.logger.debug(f"Backup {backup_name} added to local backups.")
-        self.save_backup_info()
+        try:
+            self.save_backup_info()
+        except Exception as e:
+            self.logger.exception(f"Error saving backup info. {e}", exc_info=True)
+        self.pending_backup = False
         return True
 
     def get_backup_index_by_name(self, backup_name:str, from_s3:bool=False) -> int:
@@ -766,7 +806,7 @@ class BackupManager(metaclass=Singleton):
             self.backups["local"][index].delete_raw_backup()
             if not self.backups["local"][index].completed and \
                 not self.backups["local"][index].compressed:
-                self.backups["local"].pop(index)
+                _ = self.backups["local"].pop(index)
             if self.s3_handler:
                 index_s3 = self.get_backup_index_by_name(backup.name, from_s3=True)
                 self.backups["s3"][index_s3].update(backup)
@@ -801,7 +841,7 @@ class BackupManager(metaclass=Singleton):
             self.backups["local"][index].delete_compressed_backup()
             if not self.backups["local"][index].completed and \
                 not self.backups["local"][index].compressed:
-                self.backups["local"].pop(index)
+                _ = self.backups["local"].pop(index)
             if self.s3_handler:
                 index_s3 = self.get_backup_index_by_name(backup.name, from_s3=True)
                 self.backups["s3"][index_s3].update(backup)
@@ -837,7 +877,7 @@ class BackupManager(metaclass=Singleton):
 
         try:
             self.s3_handler.delete_file(backup_name + ".zip")
-            self.backups["s3"].pop(index)
+            _ = self.backups["s3"].pop(index)
         except botocoreClientError as e:
             self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
             return False
@@ -854,31 +894,35 @@ class BackupManager(metaclass=Singleton):
         Returns:
             bool: True if the backup has been deleted, False otherwise.
         """
+        if self.pending_backup:
+            self.logger.error("Backup task is running, need to wait for it to finish.")
+            return False
+        self.pending_backup = True
         self.logger.debug(f"Deleting backup {backup_name}...")
         index = self.get_backup_index_by_name(backup_name)
 
         if index == -1:
             self.logger.error(f"Backup {backup_name} not found.")
-            return False
-
-        try:
-            self.backups["local"][index].delete_backup()
-            if not self.backups["local"][index].completed and \
-                not self.backups["local"][index].compressed:
-                self.backups["local"].pop(index)
-        except FileNotFoundError:
-            self.logger.error(f"Backup {backup_name} not found.")
-            return False
+        else:
+            try:
+                self.backups["local"][index].delete_backup()
+            except FileNotFoundError:
+                pass
+            _ = self.backups["local"].pop(index)
 
         if self.s3_handler:
             try:
                 self.s3_handler.delete_file(backup_name + ".zip")
-                self.backups["s3"].pop(index)
+                _ = self.backups["s3"].pop(self.get_backup_index_by_name(backup_name, from_s3=True))
             except botocoreClientError as e:
                 self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
-                return False
 
         self.logger.debug(f"Backup {backup_name} deleted.")
+        try:
+            self.save_backup_info()
+        except Exception as e:
+            self.logger.exception(f"Error saving backup info. {e}", exc_info=True)
+        self.pending_backup = False
         return True
 
     def delete_old_backups(self) -> None:
@@ -915,7 +959,6 @@ class BackupManager(metaclass=Singleton):
         self.logger.debug(f"Old backups deleted.")
 
     def clear_dest_path(self) -> None:
-        # dont remove dest_path itself
         self.logger.debug(f"Clearing {self.dest_path}...")
         for item in listdir(self.dest_path):
             item_path = join(self.dest_path, item)
@@ -925,12 +968,96 @@ class BackupManager(metaclass=Singleton):
                 rmtree(item_path)
         self.logger.debug(f"{self.dest_path} cleared.")
 
+    def unzip_backup(self, backup_name:str) -> bool:
+        """Unzip a backup.
+
+        Args:
+            backup_name (str): Name of the backup to unzip.
+
+        Returns:
+            bool: True if the backup has been unzipped, False otherwise.
+        """
+        if self.pending_backup:
+            self.logger.error("Backup task is running, need to wait for it to finish.")
+            return False
+        self.pending_backup = True
+        self.logger.debug(f"Unzipping backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.backups["local"][index].unpack_compressed()
+        except FileNotFoundError:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        if not exists(join(self.dest_path, backup_name)):
+            self.logger.error(f"Unzipped backup {backup_name} not found.")
+            return False
+
+        self.logger.debug(f"Backup {backup_name} unzipped.")
+
+        if self.s3_handler:
+            self.backups["s3"][self.get_backup_index_by_name(backup_name, from_s3=True)].update(self.backups["local"][index])
+            
+        self.pending_backup = False
+        return True
+
+    def restore_backup(self, backup_name:str, restore_path:str) -> bool:
+        """Restore a backup.
+
+        Args:
+            backup_name (str): Name of the backup to restore.
+            restore_path (str): Path to restore the backup.
+
+        Returns:
+            bool: True if the backup has been restored, False otherwise.
+        """
+        if self.pending_backup:
+            self.logger.error("Backup task is running, need to wait for it to finish.")
+            return False
+        self.pending_backup = True
+        self.logger.debug(f"Restoring backup {backup_name}...")
+        index = self.get_backup_index_by_name(backup_name)
+
+        if index == -1:
+            self.logger.error(f"Backup {backup_name} not found.")
+            return False
+
+        try:
+            self.backups["local"][index].restore_backup_from_raw(restore_path)
+        except FileNotFoundError as e:
+            self.logger.exception(f"Error restoring backup {backup_name}. {e}", exc_info=True)
+            return False
+        except shutilError as e:
+            self.logger.exception(f"Error restoring backup {backup_name}. {e}", exc_info=True)
+            return False
+        
+        if dircmp(self.src_path, join(self.dest_path, backup_name)).diff_files != []:
+            self.logger.error(f"Error restoring backup {backup_name}.")
+            return False
+
+        self.logger.debug(f"Backup {backup_name} restored.")
+
+        if self.s3_handler:
+            self.backups["s3"][self.get_backup_index_by_name(backup_name, from_s3=True)].update(self.backups["local"][index])
+            
+        self.pending_backup = False
+        return True
+
     def run_backup(self, callback=None) -> str:
         """Run a backup.
 
         Returns:
             str: Backup name.
         """
+        if self.pending_backup:
+            self.logger.error("A backup is already running.")
+            return None
+        self.pending_backup = True
         start_time = datetime.now().timestamp()
         self.logger.info(f"Running backup. Start time: {timestamp_to_human_readable(start_time)}.")
 
@@ -1016,5 +1143,6 @@ class BackupManager(metaclass=Singleton):
                     f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
                     markdown=True)
 
+        self.pending_backup = False
         return self.backups["local"][-1].name
 
