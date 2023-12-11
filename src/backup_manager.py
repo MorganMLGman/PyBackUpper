@@ -33,6 +33,19 @@ class BackupManager(metaclass=Singleton):
                 s3_handler=None,
                 telegram_handler=None,
                 logger:logging.Logger=None) -> None:
+        """Initialize the BackupManager class.
+
+        Args:
+            src_path (str): Source path.
+            dest_path (str): Destination path.
+            raw_to_keep (int): How many raw backups to keep.
+            compressed_to_keep (int): How many compressed backups to keep.
+            s3_to_keep (int, optional): How many S3 backups to keep. Defaults to 0.
+            ignored (str, optional): Ignored paths. Defaults to None.
+            s3_handler (_type_, optional): S3 handler. Defaults to None.
+            telegram_handler (_type_, optional): Telegram handler. Defaults to None.
+            logger (logging.Logger, optional): Logger. Defaults to None.
+        """
         self.logger = logger
         self.pending_backup = False
         self.src_path = src_path
@@ -626,6 +639,8 @@ class BackupManager(metaclass=Singleton):
         self.logger.warning(f"No backups found in {src_path}.")       
         if self.telegram_handler:
             self.telegram_handler.send_message(f"No backups found in {src_path}.")
+
+    # TODO: Add method to verify backup_info.json integrity
 
     def create_backup(self) -> bool:
         """Create a backup.
