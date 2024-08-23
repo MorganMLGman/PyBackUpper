@@ -916,6 +916,13 @@ class BackupManager(metaclass=Singleton):
         self.logger.debug(f"Deleting backup {backup_name}...")
         index = self.get_backup_index_by_name(backup_name)
 
+        if self.s3_handler:
+            try:
+                self.s3_handler.delete_file(backup_name + ".zip")
+                _ = self.backups["s3"].pop(self.get_backup_index_by_name(backup_name, from_s3=True))
+            except botocoreClientError as e:
+                self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
+
         if index == -1:
             self.logger.error(f"Backup {backup_name} not found.")
         else:
@@ -924,13 +931,6 @@ class BackupManager(metaclass=Singleton):
             except FileNotFoundError:
                 pass
             _ = self.backups["local"].pop(index)
-
-        if self.s3_handler:
-            try:
-                self.s3_handler.delete_file(backup_name + ".zip")
-                _ = self.backups["s3"].pop(self.get_backup_index_by_name(backup_name, from_s3=True))
-            except botocoreClientError as e:
-                self.logger.exception(f"Error deleting backup {backup_name} from S3. {e}", exc_info=True)
 
         self.logger.debug(f"Backup {backup_name} deleted.")
         try:

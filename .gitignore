@@ -133,6 +133,7 @@ dmypy.json
 test-source/*
 test-target/*
 test-logs/*
+test-appconfig/*
 test.cmd
 test_docker_compose.yaml
 # ignore all files in source directory

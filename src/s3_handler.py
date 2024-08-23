@@ -103,8 +103,8 @@ class S3Handler:
             TypeError: If the acl is not a string.
         """
         if acl is None:
-            raise ValueError("acl cannot be None")
-
+            acl = "private"
+            
         if not isinstance(acl, str):
             raise TypeError("acl must be a string")
 

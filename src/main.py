@@ -39,13 +39,21 @@ class PyBackUpper():
 
         self.logger.info("PyBackUpper initialized.")
 
+def main():
+
+    with open("../test-appconfig/config.json", "r") as file:
+        config = json_load(file)
+    
+    pybackupper = PyBackUpper(config)
+    pybackupper.server.run()
 
 if __name__ == "__main__":
     import logging
     import logging.config
+    from json import load as json_load
     from backup_manager import BackupManager
     from s3_handler import S3Handler
     from telegram_handler import TelegramHandler
     from server import Server
 
-
+    main()

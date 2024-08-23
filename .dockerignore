@@ -9,6 +9,7 @@ PyBackUpper.code-workspace
 .test-logs
 .test-target
 .test-source
+.test-appconfig
 source
 target
 logs

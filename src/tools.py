@@ -1,5 +1,7 @@
 from datetime import datetime
 from time import perf_counter
+from os.path import exists, normpath, getsize, join, isfile, isdir
+from json import load as json_load
 
 def size_to_human_readable(size: int) -> str:
     """Converts the size in bytes to a human readable format.
@@ -80,3 +82,31 @@ def timeit(func):
         print(f"Time elapsed: {end - start:.2f}s")
         return result
     return wrapper
+
+def read_config_from_file(file_path: str) -> dict:
+    """Function to read PyBackupper config from json file
+
+    Args:
+        filePath (str): json config file
+
+    Returns:
+        dict: parsed config
+    """
+
+    if file_path is None or file_path == "":
+        raise ValueError("file_path cannot be None or empty.")
+
+    file_path = normpath(file_path)
+
+    if not exists(file_path) or not isfile(file_path):
+        raise FileNotFoundError(f"src_path {file_path} does not exist.")
+
+    if getsize(file_path) == 0:
+        raise ValueError("File is empty.")
+
+    with open(file_path, "r") as file:
+        try:
+            return json_load(file)
+        except ValueError:
+            raise ValueError("File is not in valid JSON format")
+

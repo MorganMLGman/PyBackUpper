@@ -12,7 +12,7 @@ from backup_manager import BackupManager
 from scheduler import Scheduler
 from tools import size_to_human_readable
 
-class Message():
+class Message(dict):
     """Class to represent a message to be displayed on the website
     """
     def __init__(self, message: str, level: str) -> None:
