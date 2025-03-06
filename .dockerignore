@@ -9,8 +9,11 @@ PyBackUpper.code-workspace
 .test-logs
 .test-target
 .test-source
+.test-appconfig
 source
 target
 logs
 secrets
 test_docker_compose.yaml
+src/log_dev.conf
+src/__pycache__
