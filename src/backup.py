@@ -1,10 +1,9 @@
 """Backup class for pybackupper."""
 
-import logging
-import logging.config
-import inspect
+from logger import logger
 import shutil
 from os import walk, remove, cpu_count
+from pathlib import Path
 from os.path import exists, join, normpath, getsize
 from zipfile import ZipFile, ZIP_BZIP2
 from threading import Lock
@@ -12,13 +11,12 @@ from concurrent.futures import ThreadPoolExecutor
 from hashlib import md5, sha256, sha512, sha1
 from tools import size_to_human_readable
 
-class Backup(dict):
+class Backup():
     """Backup class for pybackupper."""
     def __init__(self,
                 name:str,
                 dest_path:str,
-                ignored:str = None,
-                logger:logging.Logger=None) -> None:
+                ignored:str = None) -> None:
         """Initializes Backup object.
 
         Args:
@@ -27,11 +25,16 @@ class Backup(dict):
             ignored (str): Ignored patterns of the backup.
             logger (logging.Logger, optional): Logger for the class. Defaults to None.
         """
-        self.logger = logger
+        
+        if name is None or name == "":
+            logger.error(f"Backup {name} is not valid.")
+            raise ValueError(f"Backup {name} is not valid.")
         self.name = name
-        self.dest_path = dest_path
+        
+        self.dest_path = dest_path        
+        self.backup_path = Path(self.dest_path).joinpath(self.name).resolve()
+        
         self.ignored = ignored
-        super().__init__(self.__dict__())
 
         try:
             size = self.get_raw_size()
@@ -40,10 +43,9 @@ class Backup(dict):
             self.completed = False
 
         self.compressed = True if exists(f"{join(self.dest_path, self.name)}.zip") else False
-        super().update(self.__dict__())
-        self.logger.debug(f"Backup {self.name} initialized.\n{self}")
+        logger.debug(f"Backup {self.name} initialized.\n{self.to_str()}")
 
-    def __str__(self) -> str:
+    def to_str(self) -> str:
         """Returns string representation of the backup.
 
         Returns:
@@ -58,7 +60,7 @@ class Backup(dict):
                 f"  Completed: {self.completed}\n" \
                 f"  Compressed: {self.compressed}\n"
 
-    def __dict__(self) -> dict:
+    def to_dict(self) -> dict:
         """Returns dictionary representation of the backup.
 
         Returns:
@@ -73,60 +75,6 @@ class Backup(dict):
             "raw_hash": self.calculate_raw_hash(method="sha256") if self.completed else None,
             "compressed_hash": self.calculate_compressed_hash(method="sha256") if self.compressed else None,
         }
-
-    @property
-    def logger(self) -> logging.Logger:
-        """Returns logger for the class.
-
-        Returns:
-            logging.Logger: Logger for the class.
-        """
-        return self._logger
-
-    @logger.setter
-    def logger(self, logger:logging.Logger) -> None:
-        """Sets logger for the class.
-
-        Args:
-            logger (logging.Logger): Logger for the class.
-        """
-        if logger is None:
-            logging.config.fileConfig("log_dev.conf")
-            self._logger = logging.getLogger('pybackupper_logger')
-        else:
-            self._logger = logger
-
-    @property
-    def name(self) -> str:
-        """Returns name of the backup.
-
-        Returns:
-            str: Name of the backup.
-        """
-        return self._name
-
-    @name.setter
-    def name(self, name:str) -> None:
-        """Sets name of the backup.
-
-        Args:
-            name (str): Name of the backup.
-
-        Raises:
-            ValueError: Name of the backup is not valid.
-            PermissionError: Change of `name` property is not allowed for Backup.
-        """
-        if name is None or name == "":
-            self.logger.error(f"Backup {name} is not valid.")
-            raise ValueError(f"Backup {name} is not valid.")
-
-        try:
-            if self._name != "":
-                self.logger.error("Cannot change name of the backup.")
-                raise PermissionError("Cannot change name of the backup.")
-        except AttributeError:
-            self.logger.debug(f"Setting name of the backup to {name}.")
-            self._name = name
 
     @property
     def dest_path(self) -> str:
@@ -150,64 +98,14 @@ class Backup(dict):
             PermissionError: Change of `dest_path` property is not allowed for Backup.
         """
         if dest_path is None or dest_path == "":
-            self.logger.error(f"Backup {dest_path} is not valid.")
+            logger.error(f"Backup {dest_path} is not valid.")
             raise ValueError(f"Backup {dest_path} is not valid.")
 
-        if not exists(dest_path):
-            self.logger.error(f"Backup {dest_path} does not exist.")
+        if not Path(dest_path).exists():
+            logger.error(f"Backup {dest_path} does not exist.")
             raise FileNotFoundError(f"Backup {dest_path} does not exist.")
-
-        try:
-            if self._dest_path != "":
-                self.logger.error("Cannot change destination path of the backup.")
-                raise PermissionError("Cannot change destination path of the backup.")
-        except AttributeError:
-            self.logger.debug(f"Setting destination path of the backup to {dest_path}.")
-            self._dest_path = dest_path
-
-        backup_path = join(dest_path, self.name)
-
-        try:
-            if exists(backup_path) and self.get_raw_size() > 0:
-                self.logger.debug(f"Backup {backup_path} already exists. "\
-                    "Marking it as completed.")
-                self.completed = True
-        except FileNotFoundError:
-            pass
-
-
-    @property
-    def completed(self) -> bool:
-        """Returns True if backup is completed, False otherwise.
-
-        Returns:
-            bool: True if backup is completed, False otherwise.
-        """
-        try:
-            return self._completed
-        except AttributeError:
-            return False
-
-    @completed.setter
-    def completed(self, completed:bool) -> None:
-        """Sets completed property of the backup.
-
-        Args:
-            completed (bool): True if backup is completed, False otherwise.
-
-        Raises:
-            PermissionError: Change of `completed` property is not allowed for Backup.
-        """
-        caller_class = inspect.currentframe().f_back.f_locals.get("self").__class__.__name__
-
-        if caller_class == self.__class__.__name__:
-            self.logger.debug(f"Setting completed property of the backup to {completed}.")
-            self._completed = completed
-            super().__init__(self.__dict__())
-        else:
-            self.logger.error(f"Change of `completed` property is not allowed for {caller_class}.")
-            raise PermissionError(
-                f"Change of `completed` property is not allowed for {caller_class}.")
+        
+        self._dest_path = Path(dest_path).resolve()
 
     @property
     def ignored(self) -> str:
@@ -216,10 +114,7 @@ class Backup(dict):
         Returns:
             str: Ignored patterns of the backup.
         """
-        try:
-            return self._ignored
-        except AttributeError:
-            return "*.sock, *.pid, *.lock"
+        return self._ignored
 
     @ignored.setter
     def ignored(self, ignored:str) -> None:
@@ -238,51 +133,10 @@ class Backup(dict):
 
         # check if ignored will match pattern "*.ext1, *.ext2, *.ext3, ..."
         if not all([pattern.startswith("*.") for pattern in ignored.split(", ")]):
-            self.logger.error(f"Backup {ignored} is not valid.")
+            logger.error(f"Backup {ignored} is not valid.")
             raise ValueError(f"Backup {ignored} is not valid.")
-
-        try:
-            if self._ignored != "":
-                self.logger.error("Cannot change ignored files of the backup.")
-                raise PermissionError("Cannot change ignored files of the backup.")
-        except AttributeError:
-            self.logger.debug(f"Setting ignored files of the backup to {ignored}.")
-            super().__init__(self.__dict__())
-            self._ignored = ignored
-
-    @property
-    def compressed(self) -> bool:
-        """Returns True if backup is compressed, False otherwise.
-
-        Returns:
-            bool: True if backup is compressed, False otherwise.
-        """
-        try:
-            return self._compressed
-        except AttributeError:
-            return False
-
-    @compressed.setter
-    def compressed(self, compressed:bool) -> None:
-        """Sets compressed property of the backup.
-
-        Args:
-            compressed (bool): Compressed property of the backup.
-
-        Raises:
-            PermissionError: Change of `compressed` property is not allowed for Backup.
-        """
-        caller_class = inspect.currentframe().f_back.f_locals.get("self").__class__.__name__
-
-        if caller_class == self.__class__.__name__:
-            self.logger.debug(f"Setting compressed property of the backup to {compressed}.")
-            self._compressed = compressed
-            super().__init__(self.__dict__())
-        else:
-            self.logger.error(f"Change of `compressed` property is not allowed for {caller_class}.")
-            raise PermissionError(
-                f"Change of `compressed` property is not allowed for {caller_class}.")
-
+        
+        self._ignored = ignored
 
     def get_raw_size(self) -> int:
         """Returns raw size of the backup.
@@ -290,16 +144,15 @@ class Backup(dict):
         Returns:
             int: Raw size of the backup.
         """
-        backup_path = normpath(join(self.dest_path, self.name))
-        self.logger.debug(f"Getting raw size of the backup {self.name}.")
+        logger.debug(f"Getting raw size of the backup {self.name}.")
 
-        if not exists(backup_path):
-            self.logger.debug(f"Backup {backup_path} does not exist.")
+        if not self.backup_path.exists():
+            logger.debug(f"Backup {self.backup_path} does not exist.")
             return 0
 
         size = sum(getsize(join(root, file))
-                for root, _, files in walk(backup_path) for file in files)
-        self.logger.debug(f"Raw size of the backup {self.name} is {size_to_human_readable(size)}.")
+                for root, _, files in walk(self.backup_path) for file in files)
+        logger.debug(f"Raw size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
 
     def get_compressed_size(self) -> int:
@@ -312,14 +165,14 @@ class Backup(dict):
             int: Compressed size of the backup.
         """
         backup_path = join(self.dest_path, self.name)
-        self.logger.debug(f"Getting compressed size of the backup {self.name}.")
+        logger.debug(f"Getting compressed size of the backup {self.name}.")
 
         if not exists(f"{backup_path}.zip"):
-            self.logger.error(f"Backup {backup_path}.zip does not exist.")
+            logger.error(f"Backup {backup_path}.zip does not exist.")
             raise FileNotFoundError(f"Backup {backup_path}.zip does not exist.")
 
         size = getsize(f"{backup_path}.zip")
-        self.logger.debug(
+        logger.debug(
             f"Compressed size of the backup {self.name} is {size_to_human_readable(size)}.")
         return size
 
@@ -341,7 +194,7 @@ class Backup(dict):
 
         size = raw_size + compressed_size
 
-        self.logger.debug(
+        logger.debug(
             f"Size of the backup {self.name} is {size}. "\
             f"Human readable: {size_to_human_readable(size)}.")
         return size
@@ -359,11 +212,11 @@ class Backup(dict):
             shutil.Error: Backup failed.
         """
         if self.completed:
-            self.logger.error(f"Backup {self.name} is already completed.")
+            logger.error(f"Backup {self.name} is already completed.")
             raise FileExistsError(f"Backup {self.name} is already completed.")
 
         if not exists(src_path):
-            self.logger.error(f"Backup {src_path} does not exist.")
+            logger.error(f"Backup {src_path} does not exist.")
             raise FileNotFoundError(f"Backup {src_path} does not exist.")
 
         ignored_extensions = self.ignored.split(", ")
@@ -371,18 +224,18 @@ class Backup(dict):
         backup_path = join(self.dest_path, self.name)
 
         try:
-            self.logger.debug(f"Creating raw backup of {src_path} to {self.dest_path}.")
+            logger.debug(f"Creating raw backup of {src_path} to {self.dest_path}.")
             shutil.copytree(src_path,
                             backup_path,
                             symlinks=True,
                             ignore_dangling_symlinks=True,
                             ignore=shutil.ignore_patterns(*ignored_extensions))
         except shutil.Error as e:
-            self.logger.exception(f"Backup {self.name} failed. Exception: {e}.")
+            logger.exception(f"Backup {self.name} failed. Exception: {e}.")
             raise e
 
         self.completed = True
-        self.logger.debug(f"Backup {self.name} completed.")
+        logger.debug(f"Backup {self.name} completed.")
 
     def _add_to_zip(self, lock: Lock, handle: ZipFile, file_paths_batch: list) -> None:
         """Adds files to the zip file.
@@ -408,14 +261,14 @@ class Backup(dict):
         """
 
         if not self.completed:
-            self.logger.error(f"Backup {self.name} is not completed.")
+            logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
 
         if self.compressed:
-            self.logger.info(f"Backup {self.name} is already compressed. Nothing to do :).")
+            logger.info(f"Backup {self.name} is already compressed. Nothing to do :).")
             return
 
-        self.logger.debug(f"Compressing raw backup {self.name}.")
+        logger.debug(f"Compressing raw backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
         file_paths = []
@@ -428,7 +281,7 @@ class Backup(dict):
 
         n_workers = cpu_count() * 2
 
-        self.logger.debug(f"Using {n_workers} workers to compress the backup.")
+        logger.debug(f"Using {n_workers} workers to compress the backup.")
 
         chunk_size = len(file_paths) // n_workers
         if chunk_size == 0:
@@ -443,27 +296,27 @@ class Backup(dict):
                     _ = executor.submit(self._add_to_zip, lock, handle, file_paths_batch)
 
         if not exists(f"{backup_path}.zip"):
-            self.logger.error(f"Zip file {backup_path}.zip was not created.")
+            logger.error(f"Zip file {backup_path}.zip was not created.")
             raise FileNotFoundError(f"Zip file {backup_path}.zip was not created.")
 
         self.compressed = True
-        self.logger.debug(f"Backup {self.name} compressed.")
+        logger.debug(f"Backup {self.name} compressed.")
 
     def delete_raw_backup(self) -> None:
         """Deletes raw backup.
         """
-        self.logger.debug(f"Deleting raw backup {self.name}.")
+        logger.debug(f"Deleting raw backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
         shutil.rmtree(backup_path, ignore_errors=True)
 
         self.completed = False
-        self.logger.debug(f"Backup {self.name} deleted.")
+        logger.debug(f"Backup {self.name} deleted.")
 
     def delete_compressed_backup(self) -> None:
         """Deletes compressed backup.
         """
-        self.logger.debug(f"Deleting compressed backup {self.name}.")
+        logger.debug(f"Deleting compressed backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
         try:
@@ -472,19 +325,19 @@ class Backup(dict):
             pass
 
         self.compressed = False
-        self.logger.debug(f"Backup {self.name} deleted.")
+        logger.debug(f"Backup {self.name} deleted.")
 
     def delete_backup(self) -> None:
         """Deletes backup.
         """
-        self.logger.debug(f"Deleting backup {self.name}.")
+        logger.debug(f"Deleting backup {self.name}.")
 
         self.delete_raw_backup()
         self.delete_compressed_backup()
 
         self.completed = False
         self.compressed = False
-        self.logger.debug(f"Backup {self.name} deleted.")
+        logger.debug(f"Backup {self.name} deleted.")
 
     def restore_backup_from_raw(self, restore_path:str) -> None:
         """Restores backup from raw.
@@ -500,22 +353,22 @@ class Backup(dict):
         backup_path = join(self.dest_path, self.name)
 
         if not self.completed or not exists(backup_path):
-            self.logger.error(f"Backup {self.name} is not completed.")
+            logger.error(f"Backup {self.name} is not completed.")
             raise FileExistsError(f"Backup {self.name} is not completed.")
 
         try:
-            self.logger.debug(f"Restoring backup {self.name} from raw to {restore_path}.")
+            logger.debug(f"Restoring backup {self.name} from raw to {restore_path}.")
             shutil.copytree(backup_path,
                             restore_path,
                             symlinks=True,
                             dirs_exist_ok=True,
                             ignore_dangling_symlinks=True)
         except shutil.Error as e:
-            self.logger.exception(f"Backup {self.name} failed. Exception: {e}.")
+            logger.exception(f"Backup {self.name} failed. Exception: {e}.")
             raise e
 
         self.completed = True
-        self.logger.debug(f"Backup {self.name} completed.")
+        logger.debug(f"Backup {self.name} completed.")
 
     def unpack_compressed(self) -> None:
         """Unpacks compressed backup.
@@ -525,10 +378,10 @@ class Backup(dict):
         """
         backup_path = join(self.dest_path, self.name)
         if not self.compressed or not exists(f"{backup_path}.zip"):
-            self.logger.error(f"Backup {self.name} is not compressed.")
+            logger.error(f"Backup {self.name} is not compressed.")
             raise FileNotFoundError(f"Backup {self.name} is not compressed.")
 
-        self.logger.debug(f"Unpacking compressed backup {self.name}.")
+        logger.debug(f"Unpacking compressed backup {self.name}.")
         backup_path = join(self.dest_path, self.name)
 
         with ZipFile(f"{backup_path}.zip", 'r') as handle:
@@ -536,7 +389,7 @@ class Backup(dict):
 
         self.completed = True
 
-        self.logger.debug(f"Backup {self.name} unpacked.")
+        logger.debug(f"Backup {self.name} unpacked.")
 
     def calculate_raw_hash(self, method:str) -> str:
         """Calculates hash of the raw backup.
@@ -555,18 +408,18 @@ class Backup(dict):
         }
 
         if method not in methods:
-            self.logger.error(f"Method {method} is not supported.")
+            logger.error(f"Method {method} is not supported.")
             raise ValueError(f"Method {method} is not supported. "\
                 "Supported methods: md5, sha1, sha256, sha512.")
 
         backup_path = join(self.dest_path, self.name)
 
         if not exists(backup_path):
-            self.logger.error(f"Backup {self.name} is not completed.")
+            logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
 
         if not self.completed:
-            self.logger.warning(f"Backup {self.name} is not completed. "\
+            logger.warning(f"Backup {self.name} is not completed. "\
                 "Calculating hash of the incomplete backup.")           
 
         dir_hash = methods[method]()
@@ -578,7 +431,7 @@ class Backup(dict):
 
         dir_hash = dir_hash.hexdigest()
 
-        self.logger.debug(f"{method} hash of the raw backup {self.name} is {dir_hash}.")
+        logger.debug(f"{method} hash of the raw backup {self.name} is {dir_hash}.")
         return dir_hash
 
     def calculate_compressed_hash(self, method) -> str:
@@ -599,14 +452,14 @@ class Backup(dict):
         }
 
         if method not in methods:
-            self.logger.error(f"Method {method} is not supported.")
+            logger.error(f"Method {method} is not supported.")
             raise ValueError(f"Method {method} is not supported. "\
                 "Supported methods: md5, sha1, sha256, sha512.")
 
         backup_path = join(self.dest_path, self.name)
 
         if not exists(f"{backup_path}.zip"):
-            self.logger.error(f"Backup {self.name} is not completed.")
+            logger.error(f"Backup {self.name} is not completed.")
             raise FileNotFoundError(f"Backup {self.name} is not completed.")
 
         zip_hash = methods[method]()
@@ -616,7 +469,7 @@ class Backup(dict):
 
         zip_hash = zip_hash.hexdigest()
 
-        self.logger.debug(f"{method} hash of the compressed backup {self.name} is {zip_hash}.")
+        logger.debug(f"{method} hash of the compressed backup {self.name} is {zip_hash}.")
         return zip_hash
 
     def restore_backup(self, restore_path:str) -> bool:
@@ -634,24 +487,24 @@ class Backup(dict):
             bool: True if backup was restored successfully, False if errors occurred.
         """
         if restore_path is None or restore_path == "":
-            self.logger.error(f"Restore path {restore_path} is not valid.")
+            logger.error(f"Restore path {restore_path} is not valid.")
             raise ValueError(f"Restore path {restore_path} is not valid.")
 
         if not exists(restore_path):
-            self.logger.error(f"Restore path {restore_path} does not exist.")
+            logger.error(f"Restore path {restore_path} does not exist.")
             raise FileNotFoundError(f"Restore path {restore_path} does not exist.")
 
         if self.completed:
-            self.logger.info(f"Restoring backup {self.name} from raw to {restore_path}.")
+            logger.info(f"Restoring backup {self.name} from raw to {restore_path}.")
             self.restore_backup_from_raw(restore_path)
 
         elif self.compressed:
-            self.logger.info(f"Restoring backup {self.name} from compressed to {restore_path}.")
+            logger.info(f"Restoring backup {self.name} from compressed to {restore_path}.")
             self.unpack_compressed()
             self.restore_backup_from_raw(restore_path)
 
         else:
-            self.logger.error(f"Backup {self.name} is not available.")
+            logger.error(f"Backup {self.name} is not available.")
             raise FileNotFoundError(f"Backup {self.name} is not available.")
 
         backup_hash = self.calculate_raw_hash(method="sha256")
@@ -665,10 +518,10 @@ class Backup(dict):
         restore_hash = restore_hash.hexdigest()
 
         if backup_hash == restore_hash:
-            self.logger.info(f"Backup {self.name} restored to {restore_path} successfully.")
+            logger.info(f"Backup {self.name} restored to {restore_path} successfully.")
             return True
 
-        self.logger.warning(
+        logger.warning(
             f"Backup {self.name} restored to {restore_path}, but hashes are different. "\
             f"Backup hash: {backup_hash}, restore hash: {restore_hash}.")
         return False
@@ -687,5 +540,5 @@ class Backup(dict):
         except FileNotFoundError:
             ratio = 0.0
 
-        self.logger.debug(f"Compression ratio of the backup {self.name} is {ratio}.")
+        logger.debug(f"Compression ratio of the backup {self.name} is {ratio}.")
         return ratio
