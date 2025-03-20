@@ -845,6 +845,9 @@ class BackupManager(metaclass=Singleton):
         self.pending_backup = False
         return True
 
+    # TODO: Słownik eventów completed, failed... z calbackami/listenerami 
+    # Dodać testy do listenera
+    # TDD
     def run_backup(self, callback=None) -> str:
         """Run a backup.
 

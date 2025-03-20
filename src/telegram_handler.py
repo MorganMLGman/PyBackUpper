@@ -23,6 +23,7 @@ class TelegramHandler(metaclass=Singleton):
             raise ConnectionError("TelegramHandler initialization failed.")
         self.logger.debug("TelegramHandler initialized.")
 
+    # usunąć properties 
     @property
     def token(self) -> str:
         """Telegram bot token.

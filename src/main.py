@@ -15,6 +15,7 @@ class PyBackUpper():
             chat_id=config["telegram"]["chat_id"],
             logger=self.logger) if "telegram" in config else None
 
+        # rozbić logikę, przenieś zarządanie usuwaniem 
         self.s3_handler = S3Handler(
             bucket_name=config["s3"]["bucket"],
             access_key=config["s3"]["access_key"],

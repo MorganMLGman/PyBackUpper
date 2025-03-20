@@ -25,17 +25,16 @@ class Backup():
             ignored (str): Ignored patterns of the backup.
             logger (logging.Logger, optional): Logger for the class. Defaults to None.
         """
-        
-        if name is None or name == "":
-            logger.error(f"Backup {name} is not valid.")
-            raise ValueError(f"Backup {name} is not valid.")
         self.name = name
         
-        self.dest_path = dest_path        
-        self.backup_path = Path(self.dest_path).joinpath(self.name).resolve()
+        self.dest_path = dest_path   
+        # TODO: dodać funkcje do inicjalizacji nie __init      
+        self.backup_path = Path(self.dest_path) / self.name
         
+        self.ignored = "*.sock, *.pid, *.lock"
         self.ignored = ignored
 
+        # TODO: przenieść do funkcji
         try:
             size = self.get_raw_size()
             self.completed =  True if size > 0 else False
@@ -128,9 +127,6 @@ class Backup():
             PermissionError: Change of `ignored` property is not allowed for Backup.
         """
 
-        if ignored is None or ignored == "":
-            ignored = "*.sock, *.pid, *.lock"
-
         # check if ignored will match pattern "*.ext1, *.ext2, *.ext3, ..."
         if not all([pattern.startswith("*.") for pattern in ignored.split(", ")]):
             logger.error(f"Backup {ignored} is not valid.")
@@ -141,7 +137,7 @@ class Backup():
     def get_raw_size(self) -> int:
         """Returns raw size of the backup.
 
-        Returns:
+        Returns:git
             int: Raw size of the backup.
         """
         logger.debug(f"Getting raw size of the backup {self.name}.")
