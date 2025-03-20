@@ -49,9 +49,19 @@ class BackupManager(metaclass=Singleton):
         self.src_path = src_path
         self.dest_path = dest_path
         self.ignored = ignored
+        
+        if not type(raw_to_keep) is int:
+            logger.error("raw_to_keep must be an integer.")
+            raise TypeError("raw_to_keep must be an integer.")
+
+        if raw_to_keep < 0:
+            logger.error("raw_to_keep must be greater or equal to 0.")
+            raise ValueError("raw_to_keep must be greater or equal to 0.")
+        
         self.raw_to_keep = raw_to_keep
-        self.compressed_to_keep = compressed_to_keep
-        self.s3_to_keep = s3_to_keep
+        
+        self.compressed_to_keep = 0 if compressed_to_keep < 0 else compressed_to_keep        
+        self.s3_to_keep = 0 if s3_to_keep < 0 else s3_to_keep
 
         self.s3_handler = s3_handler
         self.telegram_handler = telegram_handler
@@ -69,7 +79,7 @@ class BackupManager(metaclass=Singleton):
             self.restore_backup_info()
         logger.info("BackupManager initialized.")
 
-    def __str__(self) -> str:
+    def to_string(self) -> str:
         """Get the string representation of the object.
 
         Returns:
@@ -118,186 +128,6 @@ class BackupManager(metaclass=Singleton):
             "s3_to_keep": self.s3_to_keep,
             "backups": {key: [backup.to_dict() for backup in self.backups[key]] for key in self.backups.keys()}
         }
-
-    @property
-    def src_path(self) -> str:
-        """Get the source path.
-
-        Returns:
-            str: Source path.
-        """
-        return self._src_path
-
-    @src_path.setter
-    def src_path(self, src_path:str) -> None:
-        """
-
-        Args:
-            src_path (str): Source path.
-
-        Raises:
-            ValueError: Source path cannot be None or empty.
-            FileNotFoundError: Source path does not exist.
-        """
-        if src_path is None or src_path == "":
-            logger.error("src_path cannot be None or empty.")
-            raise ValueError("src_path cannot be None or empty.")
-
-        src_path = normpath(src_path)
-        if not exists(src_path):
-            logger.error(f"src_path {src_path} does not exist.")
-            raise FileNotFoundError(f"src_path {src_path} does not exist.")
-
-        self._src_path = src_path
-
-    @property
-    def dest_path(self) -> str:
-        """Get the destination path.
-
-        Returns:
-            str: Destination path.
-        """
-        return self._dest_path
-
-    @dest_path.setter
-    def dest_path(self, dest_path:str) -> None:
-        """
-
-        Args:
-            dest_path (str): Destination path.
-
-        Raises:
-            ValueError: Destination path cannot be None or empty.
-            OSError: Destination path cannot be created.
-        """
-        if dest_path is None or dest_path == "":
-            logger.error("dest_path cannot be None or empty.")
-            raise ValueError("dest_path cannot be None or empty.")
-
-        dest_path = normpath(dest_path)
-        if not exists(dest_path):
-            logger.warning(f"dest_path {dest_path} does not exist. Creating it.")
-            try:
-                makedirs(dest_path)
-            except OSError as e:
-                logger.error(f"dest_path {dest_path} cannot be created. {e}")
-                raise OSError(f"dest_path {dest_path} cannot be created. {e}")
-
-        self._dest_path = dest_path
-
-    @property
-    def ignored(self) -> str:
-        """Get the ignored paths.
-
-        Returns:
-            str: Ignored paths.
-        """
-        return self._ignored
-
-    @ignored.setter
-    def ignored(self, ignored:str) -> None:
-        """
-
-        Args:
-            ignored (str): Ignored paths.
-        Raises:
-            TypeError: ignored must be a string or None.
-        """
-        if type(ignored) is str or ignored is None:
-            self._ignored = ignored
-        else:
-            logger.error("ignored must be a string or None.")
-            raise TypeError("ignored must be a string or None.")
-
-    @property
-    def raw_to_keep(self) -> int:
-        """Get the number of raw backups to keep.
-
-        Returns:
-            int: Number of raw backups to keep.
-        """
-        return self._raw_to_keep
-
-    @raw_to_keep.setter
-    def raw_to_keep(self, raw_to_keep:int) -> None:
-        """
-
-        Args:
-            raw_to_keep (int): Number of raw backups to keep.
-
-        Raises:
-            TypeError: raw_to_keep must be an integer.
-            ValueError: raw_to_keep must be greater or equal to 0.
-        """
-        if not type(raw_to_keep) is int:
-            logger.error("raw_to_keep must be an integer.")
-            raise TypeError("raw_to_keep must be an integer.")
-
-        if raw_to_keep < 0:
-            logger.error("raw_to_keep must be greater or equal to 0.")
-            raise ValueError("raw_to_keep must be greater or equal to 0.")
-
-        self._raw_to_keep = raw_to_keep
-
-    @property
-    def compressed_to_keep(self) -> int:
-        """Get the number of compressed backups to keep.
-
-        Returns:
-            int: Number of compressed backups to keep.
-        """
-        return self._compressed_to_keep
-
-    @compressed_to_keep.setter
-    def compressed_to_keep(self, compressed_to_keep:int) -> None:
-        """
-
-        Args:
-            compressed_to_keep (int): Number of compressed backups to keep.
-
-        Raises:
-            TypeError: compressed_to_keep must be an integer.
-            ValueError: compressed_to_keep must be greater or equal to 0.
-        """
-        if not type(compressed_to_keep) is int:
-            logger.error("compressed_to_keep must be an integer.")
-            raise TypeError("compressed_to_keep must be an integer.")
-
-        if compressed_to_keep < 0:
-            logger.error("compressed_to_keep must be greater or equal to 0.")
-            raise ValueError("compressed_to_keep must be greater or equal to 0.")
-
-        self._compressed_to_keep = compressed_to_keep
-
-    @property
-    def s3_to_keep(self) -> int:
-        """Get the number of S3 backups to keep.
-
-        Returns:
-            int: Number of S3 backups to keep.
-        """
-        return self._s3_to_keep
-
-    @s3_to_keep.setter
-    def s3_to_keep(self, s3_to_keep:int) -> None:
-        """
-
-        Args:
-            s3_to_keep (int): Number of S3 backups to keep.
-
-        Raises:
-            TypeError: s3_to_keep must be an integer.
-            ValueError: s3_to_keep must be greater or equal to 0.
-        """
-        if not type(s3_to_keep) is int:
-            logger.error("s3_to_keep must be an integer.")
-            raise TypeError("s3_to_keep must be an integer.")
-
-        if s3_to_keep < 0:
-            logger.error("s3_to_keep must be greater or equal to 0.")
-            raise ValueError("s3_to_keep must be greater or equal to 0.")
-
-        self._s3_to_keep = s3_to_keep
 
     @property
     def s3_handler(self):
@@ -364,28 +194,6 @@ class BackupManager(metaclass=Singleton):
             self._telegram_handler = None
         else:
             self._telegram_handler = telegram_handler
-
-    @property
-    def pending_backup(self) -> bool:
-        """Get the pending backup flag.
-
-        Returns:
-            bool: Pending backup flag.
-        """
-        return self._pending_backup
-
-    @pending_backup.setter
-    def pending_backup(self, pending_backup:bool) -> None:
-        """Set the pending backup flag.
-
-        Args:
-            pending_backup (bool): Pending backup flag.
-        """
-        if not type(pending_backup) is bool:
-            logger.error("pending_backup must be a boolean.")
-            raise TypeError("pending_backup must be a boolean.")
-
-        self._pending_backup = pending_backup
 
     def generate_backup_name(self) -> str:
         """Generate a backup name.
@@ -1137,8 +945,8 @@ class BackupManager(metaclass=Singleton):
 
 
 backupmanager = BackupManager(
-    src_path=normpath("../test-source"),
-    dest_path=normpath("../test-target"),
+    src_path=normpath("../source"),
+    dest_path=normpath("../target"),
     ignored=None,
     raw_to_keep=5,
     compressed_to_keep=5,
