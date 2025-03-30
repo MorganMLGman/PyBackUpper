@@ -123,7 +123,6 @@ class Backup():
             ValueError: Ignored files of the backup is not valid.
             PermissionError: Change of `ignored` property is not allowed for Backup.
         """
-
         # check if ignored will match pattern "*.ext1, *.ext2, *.ext3, ..."
         if not all([pattern.startswith("*.") for pattern in ignored.split(", ")]):
             logger.error(f"Backup {ignored} is not valid.")

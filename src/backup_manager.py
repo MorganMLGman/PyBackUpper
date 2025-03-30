@@ -49,6 +49,9 @@ class BackupManager(metaclass=Singleton):
         self.pending_backup = False
         self.src_path = src_path
         self.dest_path = dest_path
+        
+        if ignored is None or ignored == "":
+            ignored = "*.sock, *.pid, *.lock"
         self.ignored = ignored
         
         if not type(raw_to_keep) is int:
@@ -348,7 +351,8 @@ class BackupManager(metaclass=Singleton):
 
         for backup in backup_info["backups"]["local"]:
             try:
-                tmp_backup = Backup().initialize(backup["name"], self.dest_path, self.ignored)
+                tmp_backup = Backup()
+                tmp_backup.initialize(backup["name"], self.dest_path, self.ignored)
             except FileNotFoundError:
                 logger.error(f"Backup {backup['name']} not found.")
                 continue
@@ -950,7 +954,8 @@ class BackupManager(metaclass=Singleton):
         return self.backups["local"][-1].name
 
 
-backupmanager = BackupManager().initialize(
+backupmanager = BackupManager()
+backupmanager.initialize(
     src_path=normpath("../source"),
     dest_path=normpath("../target"),
     ignored=None,
