@@ -185,6 +185,7 @@ class Backup():
             compressed_size = 0
 
         size = raw_size + compressed_size
+        self.size = size
 
         logger.debug(
             f"Size of the backup {self.name} is {size}. "\
@@ -424,6 +425,7 @@ class Backup():
         dir_hash = dir_hash.hexdigest()
 
         logger.debug(f"{method} hash of the raw backup {self.name} is {dir_hash}.")
+        self.raw_hash = dir_hash
         return dir_hash
 
     def calculate_compressed_hash(self, method) -> str:
@@ -462,6 +464,7 @@ class Backup():
         zip_hash = zip_hash.hexdigest()
 
         logger.debug(f"{method} hash of the compressed backup {self.name} is {zip_hash}.")
+        self.compressed_hash = zip_hash
         return zip_hash
 
     def restore_backup(self, restore_path:str) -> bool:

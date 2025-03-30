@@ -20,7 +20,8 @@ from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
 from tools import *
 from logger import logger
-from backup_notifier import BackupSuccessTopic, BackupFailureTopic
+from backup_notifier import BackupStartTopic, BackupSuccessTopic, BackupFailureTopic, Message
+from print_observer import PrintObserver
 
 class BackupManager(metaclass=Singleton):
     """BackupManager class"""
@@ -81,9 +82,6 @@ class BackupManager(metaclass=Singleton):
             print(listdir(self.dest_path))
             logger.warning(f"Backup info not found. Creating it.")
             self.restore_backup_info()
-            
-        backupSuccessTopic = BackupSuccessTopic()
-        backupFailureTopic = BackupFailureTopic()
             
         logger.info("BackupManager initialized.")
 
@@ -446,7 +444,8 @@ class BackupManager(metaclass=Singleton):
             logger.error("Not enough space to create a backup.")
             return False
 
-        backup = Backup().initialize(name, self.dest_path, self.ignored)
+        backup = Backup()
+        backup.initialize(name, self.dest_path, self.ignored)
 
         try:
             backup.create_raw_backup(self.src_path)
@@ -867,6 +866,14 @@ class BackupManager(metaclass=Singleton):
         self.pending_backup = True
         start_time = datetime.now().timestamp()
         logger.info(f"Running backup. Start time: {timestamp_to_human_readable(start_time)}.")
+        
+        backupStartTopic.notify(
+            Message(
+                timestamp=start_time,
+                title="Backup started.",
+                body=""
+            )
+        )
 
         if self.create_backup():
             end_time = datetime.now().timestamp()
@@ -875,8 +882,20 @@ class BackupManager(metaclass=Singleton):
                 s3_result = self.upload_backup_to_s3(self.backups["local"][-1].name)
                 upload_end_time = datetime.now().timestamp()
 
-            if callback:
-                callback(True, "Backup completed.")
+            backupSuccessTopic.notify(
+                Message(
+                    timestamp=end_time,
+                    title="Backup completed.",
+                    body=f"Backup {self.backups['local'][-1].name} completed.",
+                    metadata={
+                        "type": "local",
+                        "name": self.backups["local"][-1].name,
+                        "size": size_to_human_readable(self.backups["local"][-1].size),
+                        "raw_hash": self.backups["local"][-1].raw_hash,
+                        "compressed_hash": self.backups["local"][-1].compressed_hash,
+                    }
+                )
+            )
 
             self.delete_old_backups()
 
@@ -954,6 +973,14 @@ class BackupManager(metaclass=Singleton):
         return self.backups["local"][-1].name
 
 
+backupStartTopic = BackupStartTopic()
+backupSuccessTopic = BackupSuccessTopic()
+backupFailureTopic = BackupFailureTopic()
+
+backupStartTopic.attach(PrintObserver())
+backupSuccessTopic.attach(PrintObserver())
+backupFailureTopic.attach(PrintObserver())
+
 backupmanager = BackupManager()
 backupmanager.initialize(
     src_path=normpath("../source"),
@@ -966,4 +993,4 @@ backupmanager.initialize(
     telegram_handler=None
 )
 
-# backupmanager.run_backup()
+backupmanager.run_backup()
