@@ -1,8 +1,6 @@
 """BackupManager class"""
 
-
 from logging.handlers import TimedRotatingFileHandler
-from singleton import Singleton
 from os.path import exists, normpath, getsize, join, isfile, isdir
 from os import makedirs, walk, listdir, remove
 from datetime import datetime
@@ -15,13 +13,14 @@ from concurrent.futures import ThreadPoolExecutor
 from re import fullmatch
 from botocore.exceptions import ClientError as botocoreClientError
 from filecmp import dircmp
-from backup import Backup
-from s3_handler import S3Handler
-from telegram_handler import TelegramHandler
-from tools import *
-from logger import logger
-from backup_notifier import BackupStartTopic, BackupSuccessTopic, BackupFailureTopic, Message
-from print_observer import PrintObserver
+from pybackupper.singleton import Singleton
+from pybackupper.backup import Backup
+from pybackupper.s3_handler import S3Handler
+from pybackupper.telegram_handler import TelegramHandler
+from pybackupper.tools import *
+from pybackupper.logger import logger
+from pybackupper.backup_notifier import BackupStartTopic, BackupSuccessTopic, BackupFailureTopic, Message
+from pybackupper.print_observer import PrintObserver
 
 class BackupManager(metaclass=Singleton):
     """BackupManager class"""
@@ -200,7 +199,7 @@ class BackupManager(metaclass=Singleton):
             self._telegram_handler = None
         else:
             self._telegram_handler = telegram_handler
-
+            
     def generate_backup_name(self) -> str:
         """Generate a backup name.
 
@@ -502,23 +501,6 @@ class BackupManager(metaclass=Singleton):
 
         if index == -1:
             logger.error(f"Backup {backup_name} not found.")
-            return False
-
-        if not self.backups["local"][index].completed or \
-            not self.backups["local"][index].compressed:
-            logger.error(f"Backup {backup_name} is not completed or compressed.")
-            return False
-
-        try:
-            self.s3_handler.upload_file(self.backups["local"][index].dest_path + "/"
-                                        + backup_name + ".zip", backup_name + ".zip")
-        except FileNotFoundError:
-            logger.error(f"Backup {backup_name} not found.")
-            return False
-        except botocoreClientError as e:
-            logger.exception(f"Error uploading backup {backup_name} to S3. {e}", exc_info=True)
-            return False
-
         self.backups["s3"].append(self.backups["local"][index])
         logger.debug(f"Backup {backup_name} uploaded to S3.")
         return True
@@ -983,8 +965,8 @@ backupFailureTopic.attach(PrintObserver())
 
 backupmanager = BackupManager()
 backupmanager.initialize(
-    src_path=normpath("../source"),
-    dest_path=normpath("../target"),
+    src_path=normpath("source"),
+    dest_path=normpath("target"),
     ignored=None,
     raw_to_keep=5,
     compressed_to_keep=5,

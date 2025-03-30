@@ -1,10 +1,10 @@
 """Backup Notifier Module"""
 
-from logger import logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from tools import timestamp_to_human_readable
+from pybackupper.tools import timestamp_to_human_readable
+from pybackupper.logger import logger
 
 @dataclass
 class Message:

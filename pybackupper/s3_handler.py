@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 import boto3
 from botocore.exceptions import ClientError
-from tools import size_to_human_readable
+from pybackupper.tools import size_to_human_readable
 
 class S3Handler:
     """S3Handler class."""

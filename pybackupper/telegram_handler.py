@@ -3,7 +3,7 @@ import logging
 import logging.config
 from os.path import exists, isfile
 import requests
-from singleton import Singleton
+from pybackupper.singleton import Singleton
 
 class TelegramHandler(metaclass=Singleton):
     """TelegramHandler class."""

@@ -1,6 +1,5 @@
 """Backup class for pybackupper."""
 
-from logger import logger
 import shutil
 from os import walk, remove, cpu_count
 from pathlib import Path
@@ -9,7 +8,8 @@ from zipfile import ZipFile, ZIP_BZIP2
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import md5, sha256, sha512, sha1
-from tools import size_to_human_readable
+from pybackupper.logger import logger
+from pybackupper.tools import size_to_human_readable
 
 class Backup():
     """Backup class for pybackupper."""    
