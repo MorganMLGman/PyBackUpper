@@ -20,10 +20,11 @@ from s3_handler import S3Handler
 from telegram_handler import TelegramHandler
 from tools import *
 from logger import logger
+from backup_notifier import BackupSuccessTopic, BackupFailureTopic
 
 class BackupManager(metaclass=Singleton):
     """BackupManager class"""
-    def __init__(self,
+    def initialize(self,
                 src_path:str,
                 dest_path:str,
                 raw_to_keep:int,
@@ -77,6 +78,10 @@ class BackupManager(metaclass=Singleton):
             print(listdir(self.dest_path))
             logger.warning(f"Backup info not found. Creating it.")
             self.restore_backup_info()
+            
+        backupSuccessTopic = BackupSuccessTopic()
+        backupFailureTopic = BackupFailureTopic()
+            
         logger.info("BackupManager initialized.")
 
     def to_string(self) -> str:
@@ -343,7 +348,7 @@ class BackupManager(metaclass=Singleton):
 
         for backup in backup_info["backups"]["local"]:
             try:
-                tmp_backup = Backup(backup["name"], self.dest_path, self.ignored)
+                tmp_backup = Backup().initialize(backup["name"], self.dest_path, self.ignored)
             except FileNotFoundError:
                 logger.error(f"Backup {backup['name']} not found.")
                 continue
@@ -372,7 +377,7 @@ class BackupManager(metaclass=Singleton):
                 self.backups["s3"].append(backup)
             else:
                 try:
-                    self.backups["s3"].append(Backup(backup["name"], self.dest_path, self.ignored))
+                    self.backups["s3"].append(Backup().initialize(backup["name"], self.dest_path, self.ignored))
                 except FileNotFoundError:
                     logger.error(f"Backup {backup} not found.")
                     continue
@@ -406,7 +411,8 @@ class BackupManager(metaclass=Singleton):
                 for backup in backups_list:
                     executor.submit(lambda: 
                         self.backups["local"].append(
-                            Backup( backup, 
+                            Backup().initialize(
+                                    backup, 
                                     self.dest_path, 
                                     self.ignored)))
 
@@ -436,7 +442,7 @@ class BackupManager(metaclass=Singleton):
             logger.error("Not enough space to create a backup.")
             return False
 
-        backup = Backup(name, self.dest_path, self.ignored)
+        backup = Backup().initialize(name, self.dest_path, self.ignored)
 
         try:
             backup.create_raw_backup(self.src_path)
@@ -553,7 +559,7 @@ class BackupManager(metaclass=Singleton):
             return False
 
         logger.debug(f"Backup {backup_name} downloaded from S3.")
-        backup = Backup(backup_name, self.dest_path, self.ignored)
+        backup = Backup().initialize(backup_name, self.dest_path, self.ignored)
         self.backups["local"].append(backup)
         self.backups["s3"][self.get_backup_index_by_name(backup_name, from_s3=True)].update(backup)
         logger.debug(f"Backup {backup_name} added to local backups.")
@@ -845,9 +851,6 @@ class BackupManager(metaclass=Singleton):
         self.pending_backup = False
         return True
 
-    # TODO: Słownik eventów completed, failed... z calbackami/listenerami 
-    # Dodać testy do listenera
-    # TDD
     def run_backup(self, callback=None) -> str:
         """Run a backup.
 
@@ -947,7 +950,7 @@ class BackupManager(metaclass=Singleton):
         return self.backups["local"][-1].name
 
 
-backupmanager = BackupManager(
+backupmanager = BackupManager().initialize(
     src_path=normpath("../source"),
     dest_path=normpath("../target"),
     ignored=None,
@@ -958,4 +961,4 @@ backupmanager = BackupManager(
     telegram_handler=None
 )
 
-backupmanager.run_backup()
+# backupmanager.run_backup()

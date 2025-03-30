@@ -12,29 +12,25 @@ from hashlib import md5, sha256, sha512, sha1
 from tools import size_to_human_readable
 
 class Backup():
-    """Backup class for pybackupper."""
-    def __init__(self,
-                name:str,
-                dest_path:str,
-                ignored:str = None) -> None:
+    """Backup class for pybackupper."""    
+        
+    def initialize(self,
+                name: str, 
+                dest_path: str,
+                ignored: str) -> None:
         """Initializes Backup object.
-
         Args:
             name (str): Backup name.
             dest_path (str): Destination path of the backup.
             ignored (str): Ignored patterns of the backup.
-            logger (logging.Logger, optional): Logger for the class. Defaults to None.
         """
         self.name = name
-        
-        self.dest_path = dest_path   
-        # TODO: dodać funkcje do inicjalizacji nie __init      
+        self.dest_path = dest_path      
         self.backup_path = Path(self.dest_path) / self.name
         
         self.ignored = "*.sock, *.pid, *.lock"
         self.ignored = ignored
 
-        # TODO: przenieść do funkcji
         try:
             size = self.get_raw_size()
             self.completed =  True if size > 0 else False
@@ -43,6 +39,7 @@ class Backup():
 
         self.compressed = True if exists(f"{join(self.dest_path, self.name)}.zip") else False
         logger.debug(f"Backup {self.name} initialized.\n{self.to_str()}")
+        
 
     def to_str(self) -> str:
         """Returns string representation of the backup.
