@@ -9,7 +9,7 @@ import logging
 import logging.config
 import os
 from s3_handler import S3Handler
-from telegram_handler import TelegramHandler
+from pybackupper.telegram import TelegramHandler
 from backups_manager import BackupManager
 from pprint import pformat
 from flask import Flask, render_template

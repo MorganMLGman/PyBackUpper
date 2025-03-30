@@ -10,7 +10,7 @@ class PyBackUpper():
         logging.config.fileConfig("log_dev.conf")
         self.logger = logging.getLogger('pybackupper_logger')
 
-        self.telegram_handler = TelegramHandler(
+        self.telegram_handler = Telegram(
             token=config["telegram"]["token"],
             chat_id=config["telegram"]["chat_id"],
             logger=self.logger) if "telegram" in config else None
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     from json import load as json_load
     from backup_manager import BackupManager
     from s3_handler import S3Handler
-    from telegram_handler import TelegramHandler
+    from pybackupper.telegram import Telegram
     from server import Server
 
     main()

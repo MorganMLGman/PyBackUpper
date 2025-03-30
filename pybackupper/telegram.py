@@ -1,98 +1,34 @@
-"""TelegramHandler class."""
-import logging
-import logging.config
-from os.path import exists, isfile
-import requests
-from pybackupper.singleton import Singleton
+"""Telegram class."""
 
-class TelegramHandler(metaclass=Singleton):
-    """TelegramHandler class."""
-    def __init__(self, token:str, chat_id:str, logger:logging.Logger=None) -> None:
-        """Initializes TelegramHandler class.
+import requests
+from os.path import exists, isfile
+from pybackupper.logger import logger, get_last_log_file_path
+from pybackupper.singleton import Singleton
+from pybackupper.message import Message, MessageType
+from pybackupper.backup_notifier import Observer
+
+# TODO: On BACKUP_FAILURE send message with log file
+
+class SingletonObserverMeta(type(Observer), Singleton):
+    """Metaclass that combines the Observer metaclass with Singleton."""
+    pass
+
+class Telegram(Observer, metaclass=SingletonObserverMeta):
+    """Telegram class."""
+    def __init__(self, token:str, chat_id:str) -> None:
+        """Initializes Telegram class.
 
         Args:
             token (str): Telegram bot token.
             chat_id (str): Telegram chat id.
             logger (logging.Logger, optional): Logger. Defaults to None.
         """
-        self.logger = logger
         self.token = token
         self.chat_id = chat_id
         if not self.test_connection():
-            self.logger.error("TelegramHandler initialization failed.")
-            raise ConnectionError("TelegramHandler initialization failed.")
-        self.logger.debug("TelegramHandler initialized.")
-
-    # usunąć properties 
-    @property
-    def token(self) -> str:
-        """Telegram bot token.
-
-        Returns:
-            str: Telegram bot token.
-        """
-        return self._token
-
-    @token.setter
-    def token(self, token:str) -> None:
-        """Sets Telegram bot token.
-
-        Args:
-            token (str): Telegram bot token.
-
-        Raises:
-            ValueError: Empty token.
-        """
-        if token is None or token == "":
-            self.logger.error(f"Telegram {token=} is not valid.")
-            raise ValueError(f"Telegram {token=} is not valid.")
-        self._token = token
-
-    @property
-    def chat_id(self) -> str:
-        """Telegram chat id.
-
-        Returns:
-            str: Telegram chat id.
-        """
-        return self._chat_id
-
-    @chat_id.setter
-    def chat_id(self, chat_id:str) -> None:
-        """Sets Telegram chat id.
-
-        Args:
-            chat_id (str): Telegram chat id.
-
-        Raises:
-            ValueError: Empty chat id.
-        """
-        if chat_id is None or chat_id == "":
-            self.logger.error(f"Telegram {chat_id=} is not valid.")
-            raise ValueError(f"Telegram {chat_id=} is not valid.")
-        self._chat_id = chat_id
-
-    @property
-    def logger(self) -> logging.Logger:
-        """Logger.
-
-        Returns:
-            logging.Logger: Logger.
-        """
-        return self._logger
-
-    @logger.setter
-    def logger(self, logger:logging.Logger) -> None:
-        """Sets logger.
-
-        Args:
-            logger (logging.Logger): Logger.
-        """
-        if logger is None:
-            logging.config.fileConfig("log_dev.conf")
-            self._logger = logging.getLogger('pybackupper_logger')
-        else:
-            self._logger = logger
+            logger.error("Telegram initialization failed.")
+            raise ConnectionError("Telegram initialization failed.")
+        logger.debug("Telegram initialized.")
 
     def test_connection(self) -> bool:
         """Tests connection to Telegram bot.
@@ -105,24 +41,48 @@ class TelegramHandler(metaclass=Singleton):
             response = requests.get(url, timeout=10)
 
             if response.status_code != 200:
-                self.logger.error(
+                logger.error(
                     f"Telegram connection test failed. Status code: {response.status_code}.")
                 return False
 
             if not response.json()['ok']:
-                self.logger.error(
+                logger.error(
                     f"Telegram connection test failed. Status code: {response.status_code}. "\
                     f"Response: {response.json()}.")
                 return False
 
-            self.logger.debug("Telegram connection test successful.")
+            logger.debug("Telegram connection test successful.")
             return True
         except Exception as e:
-            self.logger.error(f"Telegram connection test failed. Exception: {e}.")
+            logger.error(f"Telegram connection test failed. Exception: {e}.")
             return False
+    
+    def update(self, message:Message) -> None:
+        """Update method to be called when a notification is received.
 
+        Args:
+            message (Message): Message object containing notification data.
+        """
+        logger.debug(f"Telegram update called with message: {dict(message)}")            
+        
+        if message.type in (MessageType.BACKUP_FAILURE, MessageType.BACKUP_INFO_FAILURE):
+            log_path = get_last_log_file_path()
+            if log_path:
+                self.send_file(
+                    file_path=log_path,
+                    caption=f"Log file for {message.type.name} message.",
+                    silent=False,
+                    )
+        
+        self.send_message(
+            message.body, 
+            silent=message.metadata.get("silent", False),
+            markdown=message.metadata.get("markdown", False),
+            html=message.metadata.get("html", False),
+            )
+    
     def send_message(self,
-                    message:str,
+                    message: Message,
                     silent:bool=False,
                     markdown:bool=False,
                     html:bool=False) -> None:
@@ -140,7 +100,7 @@ class TelegramHandler(metaclass=Singleton):
             e: Exception raised when failed to send message to Telegram chat.
         """
         if message is None or message == "":
-            self.logger.error("Message is empty.")
+            logger.error("Message is empty.")
             raise ValueError("Message is empty.")
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
@@ -157,23 +117,25 @@ class TelegramHandler(metaclass=Singleton):
             data["parse_mode"] = "HTML"
 
         if markdown and html:
-            self.logger.error("Message can't be parsed as markdown and html at the same time.")
+            logger.error("Message can't be parsed as markdown and html at the same time.")
             raise ValueError("Message can't be parsed as markdown and html at the same time.")
 
         try:
             response = requests.post(url, data=data, timeout=10)
             if response.status_code != 200 or not response.json()['ok']:
-                self.logger.error(
-                    f"Failed to send message to Telegram chat. "\
-                    f"Status code: {response.status_code}. Response: {response.json()}.")
+                # TODO: Replace all logger with %s formatting
+                logger.error(
+                    "Failed to send message to Telegram chat. "\
+                    "Status code: %s. Response: %s.", 
+                    response.status_code, response.json())
                 raise ConnectionError(
                     f"Failed to send message to Telegram chat. "\
                     f"Status code: {response.status_code}. Response: {response.json()}.")
 
-            self.logger.debug("Message sent to Telegram chat.")
+            logger.debug("Message sent to Telegram chat.")
         except Exception as e:
-            self.logger.exception(e, exc_info=True)
-            self.logger.exception("Failed to send message to Telegram chat.")
+            logger.exception(e, exc_info=True)
+            logger.exception("Failed to send message to Telegram chat.")
             raise e
 
     def send_file(self, file_path:str, caption:str=None, silent:bool=False) -> None:
@@ -191,19 +153,19 @@ class TelegramHandler(metaclass=Singleton):
             e: Exception raised when failed to send file to Telegram chat.
         """
         if file_path is None or file_path == "":
-            self.logger.error("File path is empty.")
+            logger.error("File path is empty.")
             raise ValueError("File path is empty.")
 
         if not exists(file_path):
-            self.logger.error(f"File {file_path=} does not exist.")
+            logger.error(f"File {file_path=} does not exist.")
             raise FileNotFoundError(f"File {file_path=} does not exist.")
 
         if not isfile(file_path):
-            self.logger.error(f"File {file_path=} is not a file.")
+            logger.error(f"File {file_path=} is not a file.")
             raise FileNotFoundError(f"File {file_path=} is not a file.")
 
         if caption is not None and caption == "":
-            self.logger.error("Caption is provided, but is empty.")
+            logger.error("Caption is provided, but is empty.")
             raise ValueError("Caption is provided, but is empty.")
 
         url = f"https://api.telegram.org/bot{self.token}/sendDocument"
@@ -219,15 +181,15 @@ class TelegramHandler(metaclass=Singleton):
             with open(file_path, "rb") as file:
                 response = requests.post(url, data=data, files={"document": file}, timeout=10)
             if response.status_code != 200 or not response.json()['ok']:
-                self.logger.error(
+                logger.error(
                     "Failed to send file to Telegram chat. "\
                     f"Status code: {response.status_code}. Response: {response.json()}.")
                 raise ConnectionError(
                     "Failed to send file to Telegram chat. "\
                     f"Status code: {response.status_code}. Response: {response.json()}.")
 
-            self.logger.debug("File sent to Telegram chat.")
+            logger.debug("File sent to Telegram chat.")
         except Exception as e:
-            self.logger.exception(e, exc_info=True)
-            self.logger.exception("Failed to send file to Telegram chat.")
+            logger.exception(e, exc_info=True)
+            logger.exception("Failed to send file to Telegram chat.")
             raise e

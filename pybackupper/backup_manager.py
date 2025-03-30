@@ -1,6 +1,5 @@
 """BackupManager class"""
 
-from logging.handlers import TimedRotatingFileHandler
 from os.path import exists, normpath, getsize, join, isfile, isdir
 from os import makedirs, walk, listdir, remove
 from datetime import datetime
@@ -16,10 +15,10 @@ from filecmp import dircmp
 from pybackupper.singleton import Singleton
 from pybackupper.backup import Backup
 from pybackupper.s3_handler import S3Handler
-from pybackupper.telegram_handler import TelegramHandler
 from pybackupper.tools import *
-from pybackupper.logger import logger
-from pybackupper.backup_notifier import BackupStartTopic, BackupSuccessTopic, BackupFailureTopic, Message
+from pybackupper.logger import logger, get_last_log_file_path
+from pybackupper.message import Message, MessageType
+from pybackupper.backup_notifier import BackupTopic
 from pybackupper.print_observer import PrintObserver
 
 class BackupManager(metaclass=Singleton):
@@ -206,7 +205,9 @@ class BackupManager(metaclass=Singleton):
         Returns:
             str: Backup name.
         """
-        return timestamp_to_file_name(datetime.now().timestamp())
+        name = timestamp_to_file_name(datetime.now().timestamp())
+        self.last_backup_name = name
+        return name
 
     def get_src_size(self) -> int:
         """Get the size of the source.
@@ -284,6 +285,7 @@ class BackupManager(metaclass=Singleton):
 
         return True if (src_size * 1.05) < dest_space else False
 
+    # TODO: Check to use only notify and be handled in s3_handler
     def save_backup_info(self, dest_path:str=None) -> None:
         """Save the backup info to a file.
 
@@ -849,86 +851,55 @@ class BackupManager(metaclass=Singleton):
         start_time = datetime.now().timestamp()
         logger.info(f"Running backup. Start time: {timestamp_to_human_readable(start_time)}.")
         
-        backupStartTopic.notify(
+        backupTopic.notify(
             Message(
+                type=MessageType.BACKUP_START,
                 timestamp=start_time,
                 title="Backup started.",
-                body=""
             )
         )
 
         if self.create_backup():
             end_time = datetime.now().timestamp()
 
-            if self.s3_handler:
-                s3_result = self.upload_backup_to_s3(self.backups["local"][-1].name)
-                upload_end_time = datetime.now().timestamp()
-
-            backupSuccessTopic.notify(
+            backupTopic.notify(
                 Message(
+                    type=MessageType.BACKUP_SUCCESS,
                     timestamp=end_time,
                     title="Backup completed.",
-                    body=f"Backup {self.backups['local'][-1].name} completed.",
+                    body=f"Backup {self.last_backup_name} completed.",
                     metadata={
                         "type": "local",
-                        "name": self.backups["local"][-1].name,
-                        "size": size_to_human_readable(self.backups["local"][-1].size),
+                        "name": self.last_backup_name,
+                        "size": self.backups["local"][-1].size,
                         "raw_hash": self.backups["local"][-1].raw_hash,
                         "compressed_hash": self.backups["local"][-1].compressed_hash,
+                        "local_time": end_time - start_time,
                     }
                 )
             )
-
-            self.delete_old_backups()
-
+            
             logger.info(f"Backup completed. End time: {timestamp_to_human_readable(end_time)}.")
             logger.info(f"Backup duration: {time_diff_to_human_readable(round(end_time - start_time))}.")
             logger.info(f"""Backup info:\n{pformat(self.backups["local"][-1].to_dict(), sort_dicts=False, indent=2, compact=True)}.""")
-            if self.s3_handler and s3_result:
-                logger.info(f"Backup uploaded to S3. Upload duration: {time_diff_to_human_readable(round(upload_end_time - end_time))}.")
-            elif self.s3_handler and not s3_result:
-                logger.error(f"Backup upload to S3 failed.")
 
-            if self.telegram_handler:
-                telegram_message = \
-                    f"*Backup completed*\\.\n" \
-                    f"""Start time: *{timestamp_to_human_readable(start_time).replace("-", "\\-")}*\\.\n""" \
-                    f"End time: *{timestamp_to_human_readable(end_time).replace("-", "\\-")}*\\.\n" \
-                    f"Backup duration: *{time_diff_to_human_readable(round(end_time - start_time))}*\\.\n" \
-                    f"Backup info:\n```json\n{pformat(self.backups['local'][-1].to_dict()(), sort_dicts=False, indent=2, compact=True)}```\n"
-                
-                if self.s3_handler:
-                    if s3_result:
-                        telegram_message += \
-                            f"Backup uploaded to S3: *{True if self.s3_handler and s3_result else False}*\\.\n" \
-                            f"Upload duration: *{time_diff_to_human_readable(round(upload_end_time - end_time)) if s3_result else 0}*\\.\n"
+            self.delete_old_backups()
 
-                        try:
-                            s3_size = self.s3_handler.get_bucket_size()
-                            telegram_message += \
-                                f"S3 size: *{size_to_human_readable(s3_size).replace(".", "\\.")}*\\.\n"
-                        except botocoreClientError:
-                            logger.error(f"Error getting S3 size.")
-                            telegram_message += \
-                                f"*Error getting S3 size\\.*\n"
-
-                    else:
-                        telegram_message += \
-                            f"*Backup uploaded to S3 failed\\.*\n"
-
-                self.telegram_handler.send_message(
-                    telegram_message,
-                    markdown=True)
         else:
             logger.error(f"Backup failed.")
 
-            if self.telegram_handler:
-                for index, handler in enumerate(logger.handlers):
-                    if type(handler) is TimedRotatingFileHandler:
-                        break
-
-                path = normpath(logger.handlers[index].baseFilename)
-                self.telegram_handler.send_file(path, caption=f"Backup failed at {timestamp_to_human_readable(datetime.now().timestamp())}.")
+            backupTopic.notify(
+                Message(
+                    type=MessageType.BACKUP_FAILURE,
+                    timestamp=datetime.now().timestamp(),
+                    title="Backup failed.",
+                    body=f"Backup {self.last_backup_name} failed.",
+                    metadata={
+                        "type": "local",
+                        "name": self.last_backup_name
+                    }
+                )
+            )            
 
         try:
             self.save_backup_info()
@@ -936,32 +907,27 @@ class BackupManager(metaclass=Singleton):
             logger.error(f"Backup info cannot be saved.")
             logger.error(f"Printing backup info:\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}")
 
-            if self.telegram_handler:
-                self.telegram_handler.send_message(
-                    f"*Backup info cannot be saved\\.*\n" \
-                    f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
-                    markdown=True)
-        except botocoreClientError:
-            logger.error(f"Backup info cannot be uploaded to S3.")
-            logger.error(f"Printing backup info:\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}")
-
-            if self.telegram_handler:
-                self.telegram_handler.send_message(
-                    f"*Backup info cannot be uploaded to S3\\.*\n" \
-                    f"Printing backup info:\n```json\n{pformat(self.__dict__(), sort_dicts=False, compact=True, indent=2)}```\n",
-                    markdown=True)
+            backupTopic.notify(
+                Message(
+                    type=MessageType.BACKUP_FAILURE,
+                    timestamp=datetime.now().timestamp(),
+                    title="Backup info cannot be saved.",
+                    body=f"```json\n{pformat(self.to_dict(), sort_dicts=False, compact=True, indent=2)}```",
+                    metadata={
+                        "type": "backup_info",
+                        "name": self.last_backup_name,
+                        "markdown": True,
+                    }
+                )
+            )
 
         self.pending_backup = False
-        return self.backups["local"][-1].name
+        return self.last_backup_name
 
 
-backupStartTopic = BackupStartTopic()
-backupSuccessTopic = BackupSuccessTopic()
-backupFailureTopic = BackupFailureTopic()
+backupTopic = BackupTopic()
 
-backupStartTopic.attach(PrintObserver())
-backupSuccessTopic.attach(PrintObserver())
-backupFailureTopic.attach(PrintObserver())
+backupTopic.attach(PrintObserver())
 
 backupmanager = BackupManager()
 backupmanager.initialize(
