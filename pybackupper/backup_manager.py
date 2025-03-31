@@ -14,7 +14,6 @@ from botocore.exceptions import ClientError as botocoreClientError
 from filecmp import dircmp
 from pybackupper.singleton import Singleton
 from pybackupper.backup import Backup
-from pybackupper.s3_handler import S3Handler
 from pybackupper.tools import *
 from pybackupper.logger import logger, get_last_log_file_path
 from pybackupper.message import Message, MessageType
@@ -28,10 +27,8 @@ class BackupManager(metaclass=Singleton):
                 dest_path:str,
                 raw_to_keep:int,
                 compressed_to_keep:int,
-                s3_to_keep:int = 0,
-                ignored:str=None,
-                s3_handler=None,
-                telegram_handler=None) -> None:
+                ignored:str=None
+                ) -> None:
         """Initialize the BackupManager class.
 
         Args:
@@ -39,11 +36,7 @@ class BackupManager(metaclass=Singleton):
             dest_path (str): Destination path.
             raw_to_keep (int): How many raw backups to keep.
             compressed_to_keep (int): How many compressed backups to keep.
-            s3_to_keep (int, optional): How many S3 backups to keep. Defaults to 0.
             ignored (str, optional): Ignored paths. Defaults to None.
-            s3_handler (_type_, optional): S3 handler. Defaults to None.
-            telegram_handler (_type_, optional): Telegram handler. Defaults to None.
-            logger (logging.Logger, optional): Logger. Defaults to None.
         """
         self.pending_backup = False
         self.src_path = src_path
@@ -63,11 +56,7 @@ class BackupManager(metaclass=Singleton):
         
         self.raw_to_keep = raw_to_keep
         
-        self.compressed_to_keep = 0 if compressed_to_keep < 0 else compressed_to_keep        
-        self.s3_to_keep = 0 if s3_to_keep < 0 else s3_to_keep
-
-        self.s3_handler = s3_handler
-        self.telegram_handler = telegram_handler
+        self.compressed_to_keep = 0 if compressed_to_keep < 0 else compressed_to_keep
 
         self.backups = {
             "local": [],
@@ -128,76 +117,10 @@ class BackupManager(metaclass=Singleton):
             "raw_to_keep": self.raw_to_keep,
             "compressed_to_keep": self.compressed_to_keep,
             "local_size": size_to_human_readable(sum([backup.get_size() for backup in self.backups["local"]])),
-            "s3_size": size_to_human_readable(self.s3_handler.get_bucket_size() if not self.s3_handler is None else 0),
-            "s3_to_keep": self.s3_to_keep,
+            # "s3_size": size_to_human_readable(self.s3_handler.get_bucket_size() if not self.s3_handler is None else 0),
+            # "s3_to_keep": self.s3_to_keep,
             "backups": {key: [backup.to_dict() for backup in self.backups[key]] for key in self.backups.keys()}
         }
-
-    @property
-    def s3_handler(self):
-        """Get the S3 handler.
-
-        Returns:
-            S3Handler: S3 handler.
-        """
-        return self._s3_handler
-
-    @s3_handler.setter
-    def s3_handler(self, s3_handler) -> None:
-        """Set the S3 handler.
-
-        Args:
-            s3_handler (S3Handler): S3 handler.
-
-        Raises:
-            TypeError: s3_handler must be a S3Handler or None.
-        """
-        if s3_handler is None:
-            self._s3_handler = None
-            return
-
-        if not type(s3_handler) is S3Handler:
-            logger.error("s3_handler must be a S3Handler or None.")
-            raise TypeError("s3_handler must be a S3Handler or None.")
-
-        if not s3_handler.test_connection():
-            logger.error("S3 connection test failed. S3 handler will be set to None.")
-            self._s3_handler = None
-        else:
-            self._s3_handler = s3_handler
-
-    @property
-    def telegram_handler(self):
-        """Get the Telegram handler.
-
-        Returns:
-            TelegramHandler: Telegram handler.
-        """
-        return self._telegram_handler
-
-    @telegram_handler.setter
-    def telegram_handler(self, telegram_handler) -> None:
-        """Set the Telegram handler.
-
-        Args:
-            telegram_handler (TelegramHandler): Telegram handler.
-
-        Raises:
-            TypeError: telegram_handler must be a TelegramHandler or None.
-        """
-        if telegram_handler is None:
-            self._telegram_handler = None
-            return
-
-        if not type(telegram_handler) is TelegramHandler:
-            logger.error("telegram_handler must be a TelegramHandler or None.")
-            raise TypeError("telegram_handler must be a TelegramHandler or None.")
-
-        if not telegram_handler.test_connection():
-            logger.error("Telegram connection test failed. Telegram handler will be set to None.")
-            self._telegram_handler = None
-        else:
-            self._telegram_handler = telegram_handler
             
     def generate_backup_name(self) -> str:
         """Generate a backup name.
@@ -315,14 +238,14 @@ class BackupManager(metaclass=Singleton):
             dump(self.to_dict(), file, indent=4)
         logger.debug(f"Backup info saved locally to {dest_path}.")
 
-        if self.s3_handler:
-            try:
-                self.s3_handler.upload_file(path, "backup_info.json")
-            except botocoreClientError as e:
-                logger.exception(f"Error uploading backup info to S3. {e}", exc_info=True)
-                raise botocoreClientError(f"Error uploading backup info to S3. {e}")
+        # if self.s3_handler:
+        #     try:
+        #         self.s3_handler.upload_file(path, "backup_info.json")
+        #     except botocoreClientError as e:
+        #         logger.exception(f"Error uploading backup info to S3. {e}", exc_info=True)
+        #         raise botocoreClientError(f"Error uploading backup info to S3. {e}")
 
-            logger.debug(f"Backup info saved to S3.")
+        #     logger.debug(f"Backup info saved to S3.")
 
     def load_backup_info(self, src_path:str=None, ignore_hash_mismatch:bool=True) -> None:
         """Load the backup info from a file.
@@ -424,13 +347,9 @@ class BackupManager(metaclass=Singleton):
         if len(self.backups["local"]) > 0:
             logger.debug(f"Restored backups\n{pformat(backups_list, sort_dicts=False, compact=True, indent=2)}\nfrom {src_path}")
             self.save_backup_info()
-            if self.telegram_handler:
-                self.telegram_handler.send_message(f"Restored backups\n{pformat(backups_list, sort_dicts=False, compact=True, indent=2)}\nfrom {src_path}")
             return
 
-        logger.warning(f"No backups found in {src_path}.")       
-        if self.telegram_handler:
-            self.telegram_handler.send_message(f"No backups found in {src_path}.")
+        logger.warning(f"No backups found in {src_path}.")
 
     def create_backup(self) -> bool:
         """Create a backup.
@@ -883,7 +802,8 @@ class BackupManager(metaclass=Singleton):
             logger.info(f"Backup duration: {time_diff_to_human_readable(round(end_time - start_time))}.")
             logger.info(f"""Backup info:\n{pformat(self.backups["local"][-1].to_dict(), sort_dicts=False, indent=2, compact=True)}.""")
 
-            self.delete_old_backups()
+            # TODO: fix when s3 is converted to observer
+            # self.delete_old_backups()
 
         else:
             logger.error(f"Backup failed.")
@@ -935,10 +855,7 @@ backupmanager.initialize(
     dest_path=normpath("target"),
     ignored=None,
     raw_to_keep=5,
-    compressed_to_keep=5,
-    s3_to_keep=0,
-    s3_handler=None,
-    telegram_handler=None
+    compressed_to_keep=5
 )
 
 backupmanager.run_backup()

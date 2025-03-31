@@ -1,25 +1,30 @@
-"""S3Handler class."""
-import logging
-import logging.config
+"""S3Manager class."""
 from os import walk, cpu_count, makedirs
 from os.path import basename, exists, join, normpath, dirname
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 import boto3
 from botocore.exceptions import ClientError
+from pybackupper.logger import logger
 from pybackupper.tools import size_to_human_readable
+from pybackupper.singleton import Singleton
+from pybackupper.message import Message, MessageType
+from pybackupper.backup_notifier import Observer
 
-class S3Handler:
-    """S3Handler class."""
+class SingletonS3ManagerMeta(type(Observer), Singleton):
+    """Metaclass that combines the Observer metaclass with Singleton."""
+
+class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
+    """S3Manager class."""
     def __init__(self,
                 bucket_name:str,
                 access_key:str,
                 secret_key:str,
                 acl:str='public-read',
                 region:str='us-east-1',
-                url:str='https://s3.amazonaws.com',
-                logger:logging.Logger = None):
-        """Initialize the S3Handler class.
+                url:str='https://s3.amazonaws.com'
+                ):
+        """Initialize the S3Manager class.
 
         Args:
             bucket_name (str): Bucket name.
@@ -34,7 +39,6 @@ class S3Handler:
             ConnectionError: If the connection to the bucket fails.
         """
 
-        self.logger = logger
         self.bucket_name = bucket_name
         self.acl = acl
 
@@ -49,97 +53,7 @@ class S3Handler:
         if not self.test_connection():
             raise ConnectionError(f"Could not connect to bucket {self.bucket_name}")
 
-        self.logger.debug(f"Connected to bucket {self.bucket_name}")
-
-    @property
-    def bucket_name(self) -> str:
-        """Get the bucket name.
-
-        Returns:
-            str: The bucket name.
-        """
-        return self._bucket_name
-
-    @bucket_name.setter
-    def bucket_name(self, bucket_name:str) -> None:
-        """Set the bucket name.
-
-        Args:
-            bucket_name (str): The bucket name.
-
-        Raises:
-            ValueError: If the bucket name is None or empty.
-            TypeError: If the bucket name is not a string.
-        """
-        if bucket_name is None:
-            raise ValueError("bucket_name cannot be None")
-
-        if not isinstance(bucket_name, str):
-            raise TypeError("bucket_name must be a string")
-
-        if bucket_name == "":
-            raise ValueError("bucket_name cannot be empty")
-
-        self._bucket_name = bucket_name
-
-    @property
-    def acl(self) -> str:
-        """Get the acl.
-
-        Returns:
-            str: The acl.
-        """
-        return self._acl
-
-    @acl.setter
-    def acl(self, acl:str) -> None:
-        """Set the acl.
-
-        Args:
-            acl (str): The acl.
-
-        Raises:
-            ValueError: If the acl is None or empty.
-            TypeError: If the acl is not a string.
-        """
-        if acl is None:
-            acl = "private"
-            
-        if not isinstance(acl, str):
-            raise TypeError("acl must be a string")
-
-        if acl == "":
-            raise ValueError("acl cannot be empty")
-
-        self._acl = acl
-
-    @property
-    def logger(self) -> logging.Logger:
-        """Get the logger.
-
-        Returns:
-            logging.Logger: The logger.
-        """
-        return self._logger
-
-    @logger.setter
-    def logger(self, logger:logging.Logger) -> None:
-        """Set the logger.
-
-        Args:
-            logger (logging.Logger): The logger.
-
-        Raises:
-            ValueError: If the logger is None.
-            TypeError: If the logger is not a logging.Logger.
-        """
-        if logger is None:
-            logging.config.fileConfig("log_dev.conf")
-            self._logger = logging.getLogger('pybackupper_logger')
-        else:
-            if not isinstance(logger, logging.Logger):
-                raise TypeError("logger must be a logging.Logger")
-            self._logger = logger
+        logger.debug(f"Connected to bucket {self.bucket_name}")
 
     def test_connection(self) -> bool:
         """Test the connection to the bucket.
@@ -147,13 +61,23 @@ class S3Handler:
         Returns:
             bool: True if the connection is successful, False otherwise.
         """
-        self.logger.debug(f"Testing connection to bucket {self.bucket_name}")
+        logger.debug(f"Testing connection to bucket {self.bucket_name}")
         try:
             _ = self.bucket.meta.client.head_bucket(Bucket=self.bucket_name)
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             return False
         return True
+
+    def update(self, message:Message) -> None:
+        """Update method to be called when a notification is received.
+
+        Args:
+            message (Message): Message object containing notification data.
+        """
+        logger.debug(f"S3Manager update called with message: {message}")
+        if message.type == MessageType.BACKUP_SUCCESS:
+            self.upload_file(message.file_path, message.file_name)
 
     def upload_file(self, file_path:str, object_name:str=None):
         """Upload a file to the bucket.
@@ -168,25 +92,25 @@ class S3Handler:
         """
 
         if not exists(file_path):
-            self.logger.error(f"File {file_path} does not exist")
+            logger.error(f"File {file_path} does not exist")
             raise FileNotFoundError(f"File {file_path} does not exist")
 
         if object_name is None:
             object_name = basename(file_path)
         object_name = object_name.replace('\\', '/')
 
-        self.logger.debug(f"Uploading file {file_path} to {object_name}")
+        logger.debug(f"Uploading file {file_path} to {object_name}")
         try:
             _ = self.bucket.upload_file(file_path, object_name, ExtraArgs={'ACL': self.acl})
-            self.logger.debug(f"File {file_path} uploaded successfully")
+            logger.debug(f"File {file_path} uploaded successfully")
         except ClientError as error:
             if error.response['Error']['Code'] == 'LimitExceededException':
-                self.logger.warn(
+                logger.warn(
                     'API call limit exceeded; backing off and retrying in 5 seconds...')
                 sleep(5)
                 self.upload_file(file_path, object_name)
             else:
-                self.logger.exception(error, exc_info=True)
+                logger.exception(error, exc_info=True)
                 raise error
 
     def upload_directory(self, directory_path:str, object_name:str=None):
@@ -201,13 +125,13 @@ class S3Handler:
             error: botocore.exceptions: If the upload fails.
         """
         if not exists(directory_path):
-            self.logger.error(f"Directory {directory_path} does not exist")
+            logger.error(f"Directory {directory_path} does not exist")
             raise FileNotFoundError(f"Directory {directory_path} does not exist")
 
         if object_name is None:
             object_name = basename(directory_path)
 
-        self.logger.debug(f"Uploading directory {directory_path} to {object_name}")
+        logger.debug(f"Uploading directory {directory_path} to {object_name}")
 
         files_to_upload = []
         for path, _, files in walk(directory_path):
@@ -218,14 +142,14 @@ class S3Handler:
                                                     dest_path + '/' + file)))
 
         n_workers = cpu_count() * 2
-        self.logger.debug(f"Uploading {len(files_to_upload)} files with {n_workers} workers")
+        logger.debug(f"Uploading {len(files_to_upload)} files with {n_workers} workers")
 
         try:
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
                 for file_path, file_name in files_to_upload:
                     executor.submit(self.upload_file, file_path, file_name)
         except ClientError as error:
-            self.logger.exception(error, exc_info=True)
+            logger.exception(error, exc_info=True)
             raise error
 
     def delete_file(self, file_name:str) -> None:
@@ -240,22 +164,22 @@ class S3Handler:
             e: botocore.exceptions: If the delete fails.
         """
         if file_name is None:
-            self.logger.error("file_name cannot be None")
+            logger.error("file_name cannot be None")
             raise ValueError("file_name cannot be None")
 
         if not isinstance(file_name, str):
-            self.logger.error("file_name must be a string")
+            logger.error("file_name must be a string")
             raise TypeError("file_name must be a string")
 
         if file_name == "":
-            self.logger.error("file_name cannot be empty")
+            logger.error("file_name cannot be empty")
             raise ValueError("file_name cannot be empty")
 
         try:
             _ = self.bucket.delete_objects(Delete={'Objects': [{'Key': file_name}]})
-            self.logger.debug(f"File {file_name} deleted successfully")
+            logger.debug(f"File {file_name} deleted successfully")
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
 
     def delete_directory(self, directory_path:str) -> None:
@@ -270,25 +194,25 @@ class S3Handler:
             e: botocore.exceptions: If the delete fails.
         """
         if directory_path is None:
-            self.logger.error("directory_path cannot be None")
+            logger.error("directory_path cannot be None")
             raise ValueError("directory_path cannot be None")
 
         if not isinstance(directory_path, str):
-            self.logger.error("directory_path must be a string")
+            logger.error("directory_path must be a string")
             raise TypeError("directory_path must be a string")
 
         if directory_path == "":
-            self.logger.error("directory_path cannot be empty")
+            logger.error("directory_path cannot be empty")
             raise ValueError("directory_path cannot be empty")
 
         if directory_path[-1] != '/':
-            self.logger.debug(f"Adding '/' to directory_path {directory_path}")
+            logger.debug(f"Adding '/' to directory_path {directory_path}")
             directory_path += '/'
 
         try:
             _ = self.bucket.objects.filter(Prefix=directory_path).delete()
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
 
     def list_buckets(self) -> list:
@@ -300,11 +224,11 @@ class S3Handler:
         Raises:
             e: botocore.exceptions: If the list fails.
         """
-        self.logger.debug("Listing buckets")
+        logger.debug("Listing buckets")
         try:
             return [bucket["Name"] for bucket in self.bucket.meta.client.list_buckets()['Buckets']]
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
 
     def list_files(self, prefix:str=None) -> list:
@@ -319,10 +243,10 @@ class S3Handler:
         Raises:
             e: botocore.exceptions: If the list fails.
         """
-        self.logger.debug(f"Listing files in bucket {self.bucket_name}")
+        logger.debug(f"Listing files in bucket {self.bucket_name}")
         files = []
         if prefix is not None and prefix[-1] != '/':
-            self.logger.debug(f"Adding '/' to prefix {prefix}")
+            logger.debug(f"Adding '/' to prefix {prefix}")
             prefix += '/'
         try:
             if prefix is None:
@@ -339,7 +263,7 @@ class S3Handler:
         except KeyError:
             return []
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
         return files
 
@@ -355,10 +279,10 @@ class S3Handler:
         Raises:
             e: botocore.exceptions: If the list fails.
         """
-        self.logger.debug(f"Listing directories in bucket {self.bucket_name}")
+        logger.debug(f"Listing directories in bucket {self.bucket_name}")
         directories = []
         if prefix is not None and prefix[-1] != '/':
-            self.logger.debug(f"Adding '/' to prefix {prefix}")
+            logger.debug(f"Adding '/' to prefix {prefix}")
             prefix += '/'
         try:
             if prefix is None:
@@ -374,7 +298,7 @@ class S3Handler:
         except KeyError:
             return []
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
         return directories
 
@@ -391,44 +315,44 @@ class S3Handler:
             error: botocore.exceptions: If the download fails.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
         if save_path is None:
-            self.logger.error("save_path cannot be None")
+            logger.error("save_path cannot be None")
             raise ValueError("save_path cannot be None")
 
         if not isinstance(save_path, str):
-            self.logger.error("save_path must be a string")
+            logger.error("save_path must be a string")
             raise TypeError("save_path must be a string")
 
         if save_path == "":
-            self.logger.error("save_path cannot be empty")
+            logger.error("save_path cannot be empty")
             raise ValueError("save_path cannot be empty")
 
         save_path = normpath(save_path)
 
         if not exists(dirname(save_path)):
-            self.logger.debug(f"Creating directory {dirname(save_path)}")
+            logger.debug(f"Creating directory {dirname(save_path)}")
             makedirs(dirname(save_path))
 
-        self.logger.debug(f"Downloading file {object_name} to {save_path}")
+        logger.debug(f"Downloading file {object_name} to {save_path}")
         try:
             with open(save_path, 'wb') as f:
                 self.bucket.download_fileobj(object_name, f)
         except ClientError as error:
-            self.logger.exception(error, exc_info=True)
+            logger.exception(error, exc_info=True)
             raise error
 
-        self.logger.debug(f"File {object_name} downloaded successfully")
+        logger.debug(f"File {object_name} downloaded successfully")
 
     def download_directory(self, object_name:str, save_path:str) -> None:
         """Download a directory from the bucket.
@@ -443,45 +367,45 @@ class S3Handler:
             error: botocore.exceptions: If the download fails.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
         if save_path is None:
-            self.logger.error("save_path cannot be None")
+            logger.error("save_path cannot be None")
             raise ValueError("save_path cannot be None")
 
         if not isinstance(save_path, str):
-            self.logger.error("save_path must be a string")
+            logger.error("save_path must be a string")
             raise TypeError("save_path must be a string")
 
         if save_path == "":
-            self.logger.error("save_path cannot be empty")
+            logger.error("save_path cannot be empty")
             raise ValueError("save_path cannot be empty")
 
         save_path = normpath(save_path)
 
         if not exists(save_path):
-            self.logger.debug(f"Creating directory {save_path}")
+            logger.debug(f"Creating directory {save_path}")
             makedirs(save_path)
 
-        self.logger.debug(f"Downloading directory {object_name} to {save_path}")
+        logger.debug(f"Downloading directory {object_name} to {save_path}")
 
         n_workers = cpu_count() * 2
-        self.logger.debug(f"Downloading with {n_workers} workers")
+        logger.debug(f"Downloading with {n_workers} workers")
 
         for file in self.list_files(object_name):
             try:
                 self.download_file(object_name + '/' + file, join(save_path, file))
             except ClientError as error:
-                self.logger.exception(error, exc_info=True)
+                logger.exception(error, exc_info=True)
                 raise error
 
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
@@ -492,10 +416,10 @@ class S3Handler:
                         object_name + '/' + directory,
                         join(save_path, directory))
                 except ClientError as error:
-                    self.logger.exception(error, exc_info=True)
+                    logger.exception(error, exc_info=True)
                     raise error
 
-        self.logger.debug(f"Directory {object_name} downloaded successfully")
+        logger.debug(f"Directory {object_name} downloaded successfully")
 
     def get_bucket_size(self) -> int:
         """Get the bucket size.
@@ -506,15 +430,15 @@ class S3Handler:
         Raises:
             e: botocore.exceptions: If the size cannot be calculated.
         """
-        self.logger.debug(f"Calculating size of bucket {self.bucket_name}")
+        logger.debug(f"Calculating size of bucket {self.bucket_name}")
         try:
             total_size = 0
             for key in self.bucket.objects.all():
                 total_size += key.size
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
-        self.logger.debug(
+        logger.debug(
             f"Size of bucket {self.bucket_name} is {size_to_human_readable(total_size)}")
         return total_size
 
@@ -533,27 +457,27 @@ class S3Handler:
             e: botocore.exceptions: If the size cannot be calculated.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
-        self.logger.debug(f"Calculating size of object {object_name}")
+        logger.debug(f"Calculating size of object {object_name}")
         try:
             total_size = 0
             for key in self.bucket.objects.all():
                 if key.key.find(object_name) != -1:
                     total_size += key.size
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
-        self.logger.debug(f"Size of object {object_name} is {size_to_human_readable(total_size)}")
+        logger.debug(f"Size of object {object_name} is {size_to_human_readable(total_size)}")
         return total_size
 
     def check_object_exists(self, object_name:str) -> bool:
@@ -571,15 +495,15 @@ class S3Handler:
             e: botocore.exceptions: If the check fails.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
         try:
@@ -587,7 +511,7 @@ class S3Handler:
                 if key.key.find(object_name) != -1:
                     return True
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
         return False
 
@@ -606,15 +530,15 @@ class S3Handler:
             e: botocore.exceptions: If the check fails.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
         try:
@@ -622,7 +546,7 @@ class S3Handler:
                 if key.key.find(object_name) != -1:
                     return key.key
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
         return None
 
@@ -632,11 +556,11 @@ class S3Handler:
         Raises:
             e: botocore.exceptions: If the clear fails.
         """
-        self.logger.debug(f"Clearing bucket {self.bucket_name}")
+        logger.debug(f"Clearing bucket {self.bucket_name}")
         try:
             _ = self.bucket.objects.all().delete()
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e
 
     def create_download_link(self, object_name:str, expiration:int=3600) -> str:
@@ -655,15 +579,15 @@ class S3Handler:
             e: botocore.exceptions: If the link cannot be created.
         """
         if object_name is None:
-            self.logger.error("object_name cannot be None")
+            logger.error("object_name cannot be None")
             raise ValueError("object_name cannot be None")
 
         if not isinstance(object_name, str):
-            self.logger.error("object_name must be a string")
+            logger.error("object_name must be a string")
             raise TypeError("object_name must be a string")
 
         if object_name == "":
-            self.logger.error("object_name cannot be empty")
+            logger.error("object_name cannot be empty")
             raise ValueError("object_name cannot be empty")
 
         try:
@@ -672,5 +596,5 @@ class S3Handler:
                 Params={'Bucket': self.bucket_name, 'Key': object_name},
                 ExpiresIn=expiration)
         except ClientError as e:
-            self.logger.exception(e, exc_info=True)
+            logger.exception(e, exc_info=True)
             raise e

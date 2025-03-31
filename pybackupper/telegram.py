@@ -1,17 +1,14 @@
 """Telegram class."""
 
-import requests
 from os.path import exists, isfile
+import requests
 from pybackupper.logger import logger, get_last_log_file_path
 from pybackupper.singleton import Singleton
 from pybackupper.message import Message, MessageType
 from pybackupper.backup_notifier import Observer
 
-# TODO: On BACKUP_FAILURE send message with log file
-
 class SingletonObserverMeta(type(Observer), Singleton):
     """Metaclass that combines the Observer metaclass with Singleton."""
-    pass
 
 class Telegram(Observer, metaclass=SingletonObserverMeta):
     """Telegram class."""
@@ -42,29 +39,29 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
 
             if response.status_code != 200:
                 logger.error(
-                    f"Telegram connection test failed. Status code: {response.status_code}.")
+                    "Telegram connection test failed. Status code: %s.",response.status_code)
                 return False
 
             if not response.json()['ok']:
                 logger.error(
-                    f"Telegram connection test failed. Status code: {response.status_code}. "\
-                    f"Response: {response.json()}.")
+                    "Telegram connection test failed. Status code: %s. \
+                    Response: %s.", response.status_code, response.json())
                 return False
 
             logger.debug("Telegram connection test successful.")
             return True
-        except Exception as e:
-            logger.error(f"Telegram connection test failed. Exception: {e}.")
+        except ConnectionError as e:
+            logger.error("Telegram connection test failed. Exception: %s.", str(e))
             return False
-    
+
     def update(self, message:Message) -> None:
         """Update method to be called when a notification is received.
 
         Args:
             message (Message): Message object containing notification data.
         """
-        logger.debug(f"Telegram update called with message: {dict(message)}")            
-        
+        logger.debug("Telegram update called with message: %s", message)
+
         if message.type in (MessageType.BACKUP_FAILURE, MessageType.BACKUP_INFO_FAILURE):
             log_path = get_last_log_file_path()
             if log_path:
@@ -73,14 +70,14 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
                     caption=f"Log file for {message.type.name} message.",
                     silent=False,
                     )
-        
+
         self.send_message(
-            message.body, 
+            message.body,
             silent=message.metadata.get("silent", False),
             markdown=message.metadata.get("markdown", False),
             html=message.metadata.get("html", False),
             )
-    
+
     def send_message(self,
                     message: Message,
                     silent:bool=False,
@@ -105,7 +102,7 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
 
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         data = {
-                "chat_id": self.chat_id, 
+                "chat_id": self.chat_id,
                 "text": message,
                 "disable_notification": silent,
                 }
@@ -123,14 +120,13 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
         try:
             response = requests.post(url, data=data, timeout=10)
             if response.status_code != 200 or not response.json()['ok']:
-                # TODO: Replace all logger with %s formatting
                 logger.error(
-                    "Failed to send message to Telegram chat. "\
-                    "Status code: %s. Response: %s.", 
+                    "Failed to send message to Telegram chat. \
+                    Status code: %s. Response: %s.",
                     response.status_code, response.json())
                 raise ConnectionError(
-                    f"Failed to send message to Telegram chat. "\
-                    f"Status code: {response.status_code}. Response: {response.json()}.")
+                    "Failed to send message to Telegram chat. \
+                    Status code: %s Response: %s.", response.status_code, response.json())
 
             logger.debug("Message sent to Telegram chat.")
         except Exception as e:
@@ -157,12 +153,12 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
             raise ValueError("File path is empty.")
 
         if not exists(file_path):
-            logger.error(f"File {file_path=} does not exist.")
-            raise FileNotFoundError(f"File {file_path=} does not exist.")
+            logger.error("File %s does not exist.", file_path)
+            raise FileNotFoundError("File %s does not exist.", file_path)
 
         if not isfile(file_path):
-            logger.error(f"File {file_path=} is not a file.")
-            raise FileNotFoundError(f"File {file_path=} is not a file.")
+            logger.error("File %s is not a file.", file_path)
+            raise FileNotFoundError("File %s is not a file.", file_path)
 
         if caption is not None and caption == "":
             logger.error("Caption is provided, but is empty.")
@@ -182,14 +178,13 @@ class Telegram(Observer, metaclass=SingletonObserverMeta):
                 response = requests.post(url, data=data, files={"document": file}, timeout=10)
             if response.status_code != 200 or not response.json()['ok']:
                 logger.error(
-                    "Failed to send file to Telegram chat. "\
-                    f"Status code: {response.status_code}. Response: {response.json()}.")
-                raise ConnectionError(
-                    "Failed to send file to Telegram chat. "\
-                    f"Status code: {response.status_code}. Response: {response.json()}.")
+                    "Failed to send file to Telegram chat. \
+                    Status code: %s. Response: %s.", response.status_code, response.json())
+                raise ConnectionError("Failed to send file to Telegram chat. \
+                    Status code: %s. Response: %s.", response.status_code, response.json())
 
             logger.debug("File sent to Telegram chat.")
-        except Exception as e:
+        except ConnectionError as e:
             logger.exception(e, exc_info=True)
             logger.exception("Failed to send file to Telegram chat.")
             raise e
