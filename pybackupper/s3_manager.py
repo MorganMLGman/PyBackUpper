@@ -5,11 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 import boto3
 from botocore.exceptions import ClientError
+from pathlib import Path
 from pybackupper.logger import logger
 from pybackupper.tools import size_to_human_readable
 from pybackupper.singleton import Singleton
 from pybackupper.message import Message, MessageType
-from pybackupper.backup_notifier import Observer
+from pybackupper.notifier import Observer, s3Topic
 
 class SingletonS3ManagerMeta(type(Observer), Singleton):
     """Metaclass that combines the Observer metaclass with Singleton."""
@@ -17,6 +18,7 @@ class SingletonS3ManagerMeta(type(Observer), Singleton):
 class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
     """S3Manager class."""
     def __init__(self,
+                s3_to_keep:int,
                 bucket_name:str,
                 access_key:str,
                 secret_key:str,
@@ -39,6 +41,7 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
             ConnectionError: If the connection to the bucket fails.
         """
 
+        self.s3_to_keep = s3_to_keep
         self.bucket_name = bucket_name
         self.acl = acl
 
@@ -77,7 +80,7 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
         """
         logger.debug(f"S3Manager update called with message: {message}")
         if message.type == MessageType.BACKUP_SUCCESS:
-            self.upload_file(message.file_path, message.file_name)
+            self.upload_last_backup(message)
 
     def upload_file(self, file_path:str, object_name:str=None):
         """Upload a file to the bucket.
@@ -97,7 +100,6 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
 
         if object_name is None:
             object_name = basename(file_path)
-        object_name = object_name.replace('\\', '/')
 
         logger.debug(f"Uploading file {file_path} to {object_name}")
         try:
@@ -105,7 +107,7 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
             logger.debug(f"File {file_path} uploaded successfully")
         except ClientError as error:
             if error.response['Error']['Code'] == 'LimitExceededException':
-                logger.warn(
+                logger.warning(
                     'API call limit exceeded; backing off and retrying in 5 seconds...')
                 sleep(5)
                 self.upload_file(file_path, object_name)
@@ -598,3 +600,32 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
         except ClientError as e:
             logger.exception(e, exc_info=True)
             raise e
+
+    def upload_last_backup(self, message) -> None:
+        """Upload the last backup to the bucket.
+
+        Args:
+            backup_name (str): The backup name.
+
+        Raises:
+            ValueError: If the backup name is None or empty.
+            TypeError: If the backup name is not a string.
+            e: botocore.exceptions: If the upload fails.
+        """
+        backup_path = Path(message.metadata['path']).joinpath(message.metadata['name'] + '.zip').resolve()
+        try:
+            self.upload_file(backup_path)
+        except ClientError as e:
+            pass
+        else:
+            s3Topic.notify(
+                Message(
+                    type=MessageType.S3_UPLOAD_SUCCESS,
+                    metadata={
+                        "name": message.metadata['name'],
+                        "size": self.get_object_size(message.metadata['name'] + ".zip"),
+                        "s3_to_keep": self.s3_to_keep,
+                        "s3_size": self.get_bucket_size(),
+                    }
+                )
+            )

@@ -5,7 +5,7 @@ import requests
 from pybackupper.logger import logger, get_last_log_file_path
 from pybackupper.singleton import Singleton
 from pybackupper.message import Message, MessageType
-from pybackupper.backup_notifier import Observer
+from pybackupper.notifier import Observer
 
 class SingletonObserverMeta(type(Observer), Singleton):
     """Metaclass that combines the Observer metaclass with Singleton."""

@@ -2,7 +2,7 @@ import unittest
 import logging
 from datetime import datetime
 from pybackupper.logger import logger
-from pybackupper.backup_notifier import Observer, Message, BackupStartTopic, BackupSuccessTopic, BackupFailureTopic
+from pybackupper.notifier import Observer, Message, BackupStartTopic, BackupSuccessTopic, BackupFailureTopic
 
 class TestObserver(Observer):
     def __init__(self):

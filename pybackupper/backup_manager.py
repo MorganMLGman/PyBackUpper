@@ -17,10 +17,12 @@ from pybackupper.backup import Backup
 from pybackupper.tools import *
 from pybackupper.logger import logger, get_last_log_file_path
 from pybackupper.message import Message, MessageType
-from pybackupper.backup_notifier import BackupTopic
-from pybackupper.print_observer import PrintObserver
+from pybackupper.notifier import Observer, backupTopic
 
-class BackupManager(metaclass=Singleton):
+class BackupManagerMeta(type(Observer), Singleton):
+    """Metaclass that combines the Observer metaclass with Singleton."""
+
+class BackupManager(Observer, metaclass=BackupManagerMeta):
     """BackupManager class"""
     def initialize(self,
                 src_path:str,
@@ -55,8 +57,10 @@ class BackupManager(metaclass=Singleton):
             raise ValueError("raw_to_keep must be greater or equal to 0.")
         
         self.raw_to_keep = raw_to_keep
-        
         self.compressed_to_keep = 0 if compressed_to_keep < 0 else compressed_to_keep
+        
+        self.s3_to_keep = 0
+        self.s3_size = 0
 
         self.backups = {
             "local": [],
@@ -117,10 +121,13 @@ class BackupManager(metaclass=Singleton):
             "raw_to_keep": self.raw_to_keep,
             "compressed_to_keep": self.compressed_to_keep,
             "local_size": size_to_human_readable(sum([backup.get_size() for backup in self.backups["local"]])),
-            # "s3_size": size_to_human_readable(self.s3_handler.get_bucket_size() if not self.s3_handler is None else 0),
-            # "s3_to_keep": self.s3_to_keep,
+            "s3_size": self.s3_size,
+            "s3_to_keep": self.s3_to_keep,
             "backups": {key: [backup.to_dict() for backup in self.backups[key]] for key in self.backups.keys()}
         }
+        
+    def update(self, message):
+        print(message)
             
     def generate_backup_name(self) -> str:
         """Generate a backup name.
@@ -790,6 +797,7 @@ class BackupManager(metaclass=Singleton):
                     metadata={
                         "type": "local",
                         "name": self.last_backup_name,
+                        "path": self.dest_path,
                         "size": self.backups["local"][-1].size,
                         "raw_hash": self.backups["local"][-1].raw_hash,
                         "compressed_hash": self.backups["local"][-1].compressed_hash,
@@ -843,19 +851,3 @@ class BackupManager(metaclass=Singleton):
 
         self.pending_backup = False
         return self.last_backup_name
-
-
-backupTopic = BackupTopic()
-
-backupTopic.attach(PrintObserver())
-
-backupmanager = BackupManager()
-backupmanager.initialize(
-    src_path=normpath("source"),
-    dest_path=normpath("target"),
-    ignored=None,
-    raw_to_keep=5,
-    compressed_to_keep=5
-)
-
-backupmanager.run_backup()

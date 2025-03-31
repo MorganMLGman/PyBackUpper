@@ -1,7 +1,7 @@
 """Print observer for debugging purposes."""
 
 from pprint import pformat
-from pybackupper.backup_notifier import Observer, Message
+from pybackupper.notifier import Observer, Message
 
 class PrintObserver(Observer):
     """Concrete observer that prints notifications to the console."""
