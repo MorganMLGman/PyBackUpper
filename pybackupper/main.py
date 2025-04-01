@@ -61,11 +61,12 @@
 from pybackupper.logger import logger
 from pybackupper.backup_manager import BackupManager
 from pybackupper.s3_manager import S3Manager
-from pybackupper.notifier import backupTopic, s3Topic
-from pybackupper.print_observer import PrintObserver
+from pybackupper.notifier import backupTopic, s3Topic, flaskTopic
+from pybackupper.file_observer import FileObserver
 from os.path import normpath
 
-backupTopic.attach(PrintObserver())
+# fileObserver = FileObserver("target/backup.log")
+# backupTopic.attach(fileObserver)
 
 backupmanager = BackupManager()
 backupmanager.initialize(
@@ -77,7 +78,7 @@ backupmanager.initialize(
 )
 
 
-backupTopic.attach(s3manager)    
 s3Topic.attach(backupmanager)
+# flaskTopic.attach(fileObserver)
 
 backupmanager.run_backup()

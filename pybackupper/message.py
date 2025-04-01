@@ -11,7 +11,9 @@ class MessageType(Enum):
     BACKUP_INFO_SAVE = auto()
     BACKUP_INFO_FAILURE = auto()
     S3_UPLOAD_SUCCESS = auto()
+    S3_UPLOAD_PROGRESS = auto()
     S3_UPLOAD_FAILURE = auto()
+    S3_DELETE_OLD = auto()
 
 @dataclass
 class Message:

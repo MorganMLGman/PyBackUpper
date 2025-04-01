@@ -19,10 +19,10 @@ from pybackupper.logger import logger, get_last_log_file_path
 from pybackupper.message import Message, MessageType
 from pybackupper.notifier import Observer, backupTopic
 
-class BackupManagerMeta(type(Observer), Singleton):
+class SingletonBackupManagerMeta(type(Observer), Singleton):
     """Metaclass that combines the Observer metaclass with Singleton."""
 
-class BackupManager(Observer, metaclass=BackupManagerMeta):
+class BackupManager(Observer, metaclass=SingletonBackupManagerMeta):
     """BackupManager class"""
     def initialize(self,
                 src_path:str,
@@ -121,13 +121,14 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
             "raw_to_keep": self.raw_to_keep,
             "compressed_to_keep": self.compressed_to_keep,
             "local_size": size_to_human_readable(sum([backup.get_size() for backup in self.backups["local"]])),
-            "s3_size": self.s3_size,
-            "s3_to_keep": self.s3_to_keep,
+            "s3_size": size_to_human_readable(self.s3_size),
+            "s3_to_keep": size_to_human_readable(self.s3_to_keep),
             "backups": {key: [backup.to_dict() for backup in self.backups[key]] for key in self.backups.keys()}
         }
         
-    def update(self, message):
-        print(message)
+    def update(self, message: Message):
+        if message.type == MessageType.S3_UPLOAD_SUCCESS:
+            self.update_backup_info(message)
             
     def generate_backup_name(self) -> str:
         """Generate a backup name.
@@ -215,7 +216,6 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
 
         return True if (src_size * 1.05) < dest_space else False
 
-    # TODO: Check to use only notify and be handled in s3_handler
     def save_backup_info(self, dest_path:str=None) -> None:
         """Save the backup info to a file.
 
@@ -224,7 +224,6 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
 
         Raises:
             OSError: Path cannot be created.
-            botocoreClientError: Error uploading backup info to S3.
         """
         if dest_path is None or dest_path == "":
             dest_path = self.dest_path
@@ -244,15 +243,6 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
         with open(path, "w") as file:
             dump(self.to_dict(), file, indent=4)
         logger.debug(f"Backup info saved locally to {dest_path}.")
-
-        # if self.s3_handler:
-        #     try:
-        #         self.s3_handler.upload_file(path, "backup_info.json")
-        #     except botocoreClientError as e:
-        #         logger.exception(f"Error uploading backup info to S3. {e}", exc_info=True)
-        #         raise botocoreClientError(f"Error uploading backup info to S3. {e}")
-
-        #     logger.debug(f"Backup info saved to S3.")
 
     def load_backup_info(self, src_path:str=None, ignore_hash_mismatch:bool=True) -> None:
         """Load the backup info from a file.
@@ -306,11 +296,15 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
             self.backups["local"].append(tmp_backup)
 
         for backup in backup_info["backups"]["s3"]:
-            if backup in self.backups["local"]:
-                self.backups["s3"].append(backup)
+            for local_backup in self.backups["local"]:
+                if local_backup.name == backup["name"]:
+                    self.backups["s3"].append(local_backup)
+                    break
             else:
                 try:
-                    self.backups["s3"].append(Backup().initialize(backup["name"], self.dest_path, self.ignored))
+                    tmp_backup = Backup()
+                    tmp_backup.initialize(backup["name"], self.dest_path, self.ignored)
+                    self.backups["s3"].append(tmp_backup)
                 except FileNotFoundError:
                     logger.error(f"Backup {backup} not found.")
                     continue
@@ -764,7 +758,39 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
         self.pending_backup = False
         return True
 
-    def run_backup(self, callback=None) -> str:
+    def update_backup_info(self, message:Message) -> None:
+        """Update the backup info.
+
+        Args:
+            message (Message): Message to update the backup info.
+        """
+        self.s3_size = message.metadata["s3_size"]
+        self.s3_to_keep = message.metadata["s3_to_keep"]
+
+        for backup in self.backups["local"]:
+            if backup.name == message.metadata["name"]:
+                self.backups["s3"].append(backup)
+                break
+        else:
+            logger.error(f"Backup {message.metadata['name']} not found.")
+            return
+        
+        try:
+            self.save_backup_info()
+        except OSError:
+            # TODO: notify with BACKUP_INFO_FAILURE
+            pass
+        else:
+            backupTopic.notify(
+                Message(
+                    type=MessageType.BACKUP_INFO_SAVE,
+                    metadata={
+                        "path": self.dest_path,
+                    }
+                )
+            )
+
+    def run_backup(self) -> str:
         """Run a backup.
 
         Returns:
@@ -802,6 +828,7 @@ class BackupManager(Observer, metaclass=BackupManagerMeta):
                         "raw_hash": self.backups["local"][-1].raw_hash,
                         "compressed_hash": self.backups["local"][-1].compressed_hash,
                         "local_time": end_time - start_time,
+                        "s3_backups": [ backup.name for backup in self.backups["s3"] ],
                     }
                 )
             )

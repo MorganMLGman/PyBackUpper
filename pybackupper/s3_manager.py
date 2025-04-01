@@ -1,6 +1,7 @@
 """S3Manager class."""
 from os import walk, cpu_count, makedirs
 from os.path import basename, exists, join, normpath, dirname
+from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 import boto3
@@ -10,10 +11,33 @@ from pybackupper.logger import logger
 from pybackupper.tools import size_to_human_readable
 from pybackupper.singleton import Singleton
 from pybackupper.message import Message, MessageType
-from pybackupper.notifier import Observer, s3Topic
+from pybackupper.notifier import Observer, s3Topic, flaskTopic
 
 class SingletonS3ManagerMeta(type(Observer), Singleton):
     """Metaclass that combines the Observer metaclass with Singleton."""
+
+class ProgressPercentage():
+    def __init__(self, total_size):
+        self._size = total_size
+        self._uploaded = 0
+        self._lock = Lock()
+
+    def __call__(self, bytes_amount):
+        if self._size is None or self._size == 0:
+            return
+        with self._lock:
+            self._uploaded += bytes_amount
+            percentage = (self._uploaded / self._size) * 100
+            flaskTopic.notify(
+                Message(
+                    type=MessageType.S3_UPLOAD_PROGRESS,
+                    metadata={
+                        'percentage': percentage,
+                        'uploaded': self._uploaded,
+                        'size': self._size
+                    }
+                )
+            )
 
 class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
     """S3Manager class."""
@@ -79,10 +103,14 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
             message (Message): Message object containing notification data.
         """
         logger.debug(f"S3Manager update called with message: {message}")
-        if message.type == MessageType.BACKUP_SUCCESS:
-            self.upload_last_backup(message)
+            
+        match message.type:
+            case MessageType.BACKUP_SUCCESS:
+                self.run_backup(message)
+            case MessageType.BACKUP_INFO_SAVE:
+                self.upload_backup_info(message)                
 
-    def upload_file(self, file_path:str, object_name:str=None):
+    def upload_file(self, file_path:str, object_name:str=None, size:int=None) -> None:
         """Upload a file to the bucket.
 
         Args:
@@ -103,7 +131,7 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
 
         logger.debug(f"Uploading file {file_path} to {object_name}")
         try:
-            _ = self.bucket.upload_file(file_path, object_name, ExtraArgs={'ACL': self.acl})
+            _ = self.bucket.upload_file(file_path, object_name, ExtraArgs={'ACL': self.acl}, Callback=ProgressPercentage(size))
             logger.debug(f"File {file_path} uploaded successfully")
         except ClientError as error:
             if error.response['Error']['Code'] == 'LimitExceededException':
@@ -601,31 +629,76 @@ class S3Manager(Observer, metaclass=SingletonS3ManagerMeta):
             logger.exception(e, exc_info=True)
             raise e
 
-    def upload_last_backup(self, message) -> None:
+    def upload_last_backup(self, message) -> bool:
         """Upload the last backup to the bucket.
 
         Args:
             backup_name (str): The backup name.
-
-        Raises:
-            ValueError: If the backup name is None or empty.
-            TypeError: If the backup name is not a string.
-            e: botocore.exceptions: If the upload fails.
+            
+        Returns:
+            bool: True if the upload is successful, False otherwise.
         """
         backup_path = Path(message.metadata['path']).joinpath(message.metadata['name'] + '.zip').resolve()
+        logger.debug(f"Uploading last backup {backup_path} to S3")
         try:
-            self.upload_file(backup_path)
+            self.upload_file(backup_path, size=message.metadata["size"])
         except ClientError as e:
-            pass
+            # TODO: Handle the error
+            return False
         else:
-            s3Topic.notify(
-                Message(
+            response = Message(
                     type=MessageType.S3_UPLOAD_SUCCESS,
                     metadata={
                         "name": message.metadata['name'],
-                        "size": self.get_object_size(message.metadata['name'] + ".zip"),
                         "s3_to_keep": self.s3_to_keep,
                         "s3_size": self.get_bucket_size(),
                     }
                 )
+            s3Topic.notify(
+                response
             )
+            flaskTopic.notify(
+                response
+            )        
+        return True
+
+
+    def upload_backup_info(self, message: Message) -> None:
+        backup_info_path = Path(message.metadata['path']).joinpath("backup_info.json").resolve()
+        logger.debug(f"Uploading backup info {backup_info_path} to S3")
+        try:
+            self.upload_file(backup_info_path)
+        except ClientError as e:
+            # TODO: Handle the error
+            pass
+
+    def delete_old_backups(self) -> list:
+        """Delete old backups from the bucket.
+        Returns:
+            list: The list of deleted backups.
+        """
+        deleted_backups = []
+
+        while(len(self.backups) > self.s3_to_keep):
+            logger.debug(f"Deleting old backup {self.backups[0]}")
+            self.delete_file(self.backups[0] + ".zip")
+            deleted_backups.append(self.backups[0])
+            del self.backups[0]
+
+    def run_backup(self, message: Message) -> None:
+        """Run the backup.
+
+        Args:
+            message (Message): The message object.
+        """
+        logger.debug(f"Running backup with message: {message}")
+        self.backups = message.metadata['s3_backups']
+        if not self.upload_last_backup(message):
+            logger.error("Failed to upload last backup %s.", message.metadata['name'])
+            logger.error("Deletion of old backups will be skipped.")
+            return
+
+        self.backups.append(message.metadata['name'])
+        deleted_backups =  self.delete_old_backups()
+        print(deleted_backups)
+        # TODO: Notify the user about deleted backups

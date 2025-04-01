@@ -32,10 +32,10 @@ class Topic(ABC):
         """Notify all observers with a message."""
         pass
 
-class BackupTopicMeta(type(Topic), Singleton):
+class SingletonBackupTopicMeta(type(Topic), Singleton):
     """Metaclass that combines the Topic metaclass with Singleton."""
 
-class BackupTopic(Topic, metaclass=BackupTopicMeta):
+class BackupTopic(Topic, metaclass=SingletonBackupTopicMeta):
     """Concrete topic for backup start notifications."""
 
     def __init__(self) -> None:
@@ -58,10 +58,10 @@ class BackupTopic(Topic, metaclass=BackupTopicMeta):
             logger.debug(f"Updating observer: {observer} with message: {pformat(message, sort_dicts=True)}")
             observer.update(message)
 
-class S3TopicMeta(type(Topic), Singleton):
+class SingletonS3TopicMeta(type(Topic), Singleton):
     """Metaclass that combines the Topic metaclass with Singleton."""
 
-class S3Topic(Topic, metaclass=S3TopicMeta):
+class S3Topic(Topic, metaclass=SingletonS3TopicMeta):
     """Concrete topic for S3 backup notifications."""
 
     def __init__(self) -> None:
@@ -84,10 +84,10 @@ class S3Topic(Topic, metaclass=S3TopicMeta):
             logger.debug(f"Updating observer: {observer} with message: {pformat(message, sort_dicts=True)}")
             observer.update(message)
 
-class FlaskTopicMeta(type(Topic), Singleton):
+class SingletonFlaskTopicMeta(type(Topic), Singleton):
     """Metaclass that combines the Topic metaclass with Singleton."""
 
-class FlaskTopic(Topic, metaclass=FlaskTopicMeta):
+class FlaskTopic(Topic, metaclass=SingletonFlaskTopicMeta):
     """Concrete topic for Flask backup notifications."""
 
     def __init__(self) -> None:
